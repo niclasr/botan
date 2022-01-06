@@ -4,7 +4,6 @@
 *
 * Botan is released under the Simplified BSD License (see license.txt)
 */
-
 #include <botan/tls_client.h>
 #include <botan/tls_messages.h>
 #include <botan/internal/tls_client_impl_13.h>

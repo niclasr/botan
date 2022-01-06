@@ -97,14 +97,10 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
                }
             else if(auto state = handshake_state())
                {
-               if(state->server_hello() != nullptr &&
-                  record.version() != state->version())
+               if(state->server_hello() != nullptr && record.version() != state->version())
                   {
-                  if(record.version() != state->version())
-                     {
-                     throw TLS_Exception(Alert::PROTOCOL_VERSION,
-                                         "Received unexpected record version");
-                     }
+                  throw TLS_Exception(Alert::PROTOCOL_VERSION,
+                                      "Received unexpected record version");
                   }
                }
             }
