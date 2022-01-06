@@ -111,6 +111,17 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
                throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received handshake data after connection closure");
 
             //TODO: Handle the plain handshake message
+            if(initial_record)
+               {
+               create_handshake_state(Protocol_Version::TLS_V13);  // ignore version in record header
+               }
+
+             auto msg = m_handshake_state->get_next_handshake_msg();
+             process_handshake_msg(/*active_state*/ nullptr,
+                                   *m_handshake_state.get(),
+                                   msg.first, msg.second,
+                                   /*epoch0_restart*/ false);
+
             }
          else if (record.type() == CHANGE_CIPHER_SPEC)
             {

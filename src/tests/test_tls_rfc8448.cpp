@@ -371,7 +371,7 @@ class Test_TLS_RFC8448 final : public Test
          result.confirm("client not closed", !ctx.client.is_closed());
 
          const auto client_hello_record = ctx.pull_send_buffer();
-         result.test_gte("client hello received", client_hello_record.size(), RECORD_HEADER_SIZE);
+         result.test_gte("client hello written", client_hello_record.size(), RECORD_HEADER_SIZE);
 
          check_record_header(result, client_hello_record);
          const auto client_hello_msg = slice(client_hello_record.begin() + RECORD_HEADER_SIZE, client_hello_record.end());
@@ -466,7 +466,20 @@ class Test_TLS_RFC8448 final : public Test
            "1d 00 20 c9 82 88 76 11 20 95 fe 66 76 2b db f7 c6 72 e1 56 d6"
            "cc 25 3b 83 3d f1 dd 69 b1 b0 4e 75 1f 0f 00 2b 00 02 03 04");
 
-         ctx.client.received_data(server_hello);
+         // ctx.client.received_data(server_hello);
+
+         // const auto expected_handshake_finished = Botan::hex_decode(
+         //   "17 03 03 00 35 75 ec 4d c2 38 cc e6"
+         //   "0b 29 80 44 a7 1e 21 9c 56 cc 77 b0 51 7f e9 b9 3c 7a 4b fc 44"
+         //   "d8 7f 38 f8 03 38 ac 98 fc 46 de b3 84 bd 1c ae ac ab 68 67 d7"
+         //   "26 c4 05 46");
+
+         // const auto client_handshake_finished = ctx.pull_send_buffer();
+         // result.test_gte("client handshake finished written", client_handshake_finished.size(),
+         //                                                      RECORD_HEADER_SIZE);
+
+         // result.test_eq("correct handshake finished", client_handshake_finished,
+         //                                              expected_handshake_finished);
 
          // to test:
          //   * server responds with cipher suite not offered by client
