@@ -116,6 +116,11 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
                create_handshake_state(Protocol_Version::TLS_V13);  // ignore version in record header
                }
 
+            m_handshake_state->handshake_io().add_record(m_record_buf.data(),
+                                                         m_record_buf.size(),
+                                                         record.type(),
+                                                         record.sequence());
+
              auto msg = m_handshake_state->get_next_handshake_msg();
              process_handshake_msg(/*active_state*/ nullptr,
                                    *m_handshake_state.get(),
@@ -128,7 +133,8 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
             if(m_has_been_closed)
                throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received change cipher spec after connection closure");
 
-            //TODO: Send CCS in response / middlebox compatibility mode to be defined via the policy
+            // TODO: Send CCS in response / middlebox compatibility mode to be defined via the policy
+            // TODO: as described in RFC 8446 Sec 5
             }
          else if(record.type() == APPLICATION_DATA)
             {

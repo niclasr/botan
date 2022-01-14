@@ -87,10 +87,10 @@ void Client_Impl_13::initiate_handshake(Handshake_State& state,
    }
 
 void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state,
-                                           Handshake_State& state,
-                                           Handshake_Type type,
-                                           const std::vector<uint8_t>& contents,
-                                           bool epoch0_restart)
+      Handshake_State& state,
+      Handshake_Type type,
+      const std::vector<uint8_t>& contents,
+      bool epoch0_restart)
    {
    // there cannot be a previous state in TLS 1.3 as renegotiation is not allowed
    BOTAN_ASSERT_NOMSG(previous_state == nullptr);
@@ -98,15 +98,15 @@ void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state
    // does not apply on client side
    BOTAN_ASSERT_NOMSG(epoch0_restart == false);
 
-   BOTAN_UNUSED(type, contents);
+   BOTAN_UNUSED(contents);
 
    state.confirm_transition_to(type);
 
-   if (type == SERVER_HELLO)
-   {
+   if(type == SERVER_HELLO)
+      {
       state.server_hello(new Server_Hello(contents));
 
-      if (state.server_hello()->legacy_version() != Protocol_Version::TLS_V12)
+      if(state.server_hello()->legacy_version() != Protocol_Version::TLS_V12)
          {
          // RFC 8446 4.1.3:
          //   In TLS 1.3, the TLS server indicates
@@ -116,21 +116,30 @@ void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state
          throw TLS_Exception(Alert::PROTOCOL_VERSION, "legacy_version must be set to 1.2 in TLS 1.3");
          }
 
-      if (auto requested = state.server_hello()->random_signals_downgrade())
+      if(auto requested = state.server_hello()->random_signals_downgrade())
          {
-         if (requested.value() == Protocol_Version::TLS_V11)
-            throw TLS_Exception(Alert::PROTOCOL_VERSION, "TLS 1.1 is not supported");
-         if (requested.value() == Protocol_Version::TLS_V12)
-            throw Not_Implemented("downgrade is nyi");
+         if(requested.value() == Protocol_Version::TLS_V11)
+            { throw TLS_Exception(Alert::PROTOCOL_VERSION, "TLS 1.1 is not supported"); }
+         if(requested.value() == Protocol_Version::TLS_V12)
+            { throw Not_Implemented("downgrade is nyi"); }
          }
 
-      if (state.server_hello()->random_signals_hello_retry_request())
+      if(state.server_hello()->random_signals_hello_retry_request())
          {
          throw Not_Implemented("hello retry is nyi");
          }
-   }
 
-   throw Not_Implemented("client 13 process_handshake_msg is nyi");
+      state.set_expected_next(ENCRYPTED_EXTENSIONS);  // TODO expect CCS (middlebox compat)
+
+      }
+   else if(type == ENCRYPTED_EXTENSIONS)
+      {
+      throw Not_Implemented("client 13 process_handshake_msg is nyi");
+      }
+   else
+      {
+      throw Unexpected_Message("unknown handshake message received");
+      }
    }
 
 std::unique_ptr<Handshake_State> Client_Impl_13::new_handshake_state(std::unique_ptr<Handshake_IO> io)
@@ -150,14 +159,14 @@ void Client_Impl_13::send_client_hello(Handshake_State& state_base,
       {
       Client_Hello::Settings client_settings(version, m_info.hostname());
       state.client_hello(new Client_Hello(
-         state.handshake_io(),
-         state.hash(),
-         policy(),
-         callbacks(),
-         rng(),
-         std::vector<uint8_t>(),
-         client_settings,
-         next_protocols));
+                            state.handshake_io(),
+                            state.hash(),
+                            policy(),
+                            callbacks(),
+                            rng(),
+                            std::vector<uint8_t>(),
+                            client_settings,
+                            next_protocols));
       }
    }
 
