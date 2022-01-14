@@ -98,15 +98,14 @@ void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state
    // does not apply on client side
    BOTAN_ASSERT_NOMSG(epoch0_restart == false);
 
-   BOTAN_UNUSED(contents);
-
    state.confirm_transition_to(type);
 
    if(type == SERVER_HELLO)
       {
       state.server_hello(new Server_Hello(contents));
+      auto sh = state.server_hello();
 
-      if(state.server_hello()->legacy_version() != Protocol_Version::TLS_V12)
+      if(sh->legacy_version() != Protocol_Version::TLS_V12)
          {
          // RFC 8446 4.1.3:
          //   In TLS 1.3, the TLS server indicates
@@ -116,7 +115,7 @@ void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state
          throw TLS_Exception(Alert::PROTOCOL_VERSION, "legacy_version must be set to 1.2 in TLS 1.3");
          }
 
-      if(auto requested = state.server_hello()->random_signals_downgrade())
+      if(auto requested = sh->random_signals_downgrade())
          {
          if(requested.value() == Protocol_Version::TLS_V11)
             { throw TLS_Exception(Alert::PROTOCOL_VERSION, "TLS 1.1 is not supported"); }
@@ -124,10 +123,20 @@ void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state
             { throw Not_Implemented("downgrade is nyi"); }
          }
 
-      if(state.server_hello()->random_signals_hello_retry_request())
+      if(sh->random_signals_hello_retry_request())
          {
          throw Not_Implemented("hello retry is nyi");
          }
+
+      if(!sh->extensions().has<Key_Share>())
+         {
+           // TODO
+         throw Unexpected_Message("keyshare ext not found!");
+         }
+
+      BOTAN_ASSERT_NOMSG(state.client_hello()->extensions().has<Key_Share>());
+      auto my_keyshare = state.client_hello()->extensions().get<Key_Share>();
+      const auto shared_secret = my_keyshare->exchange(sh->extensions().get<Key_Share>(), policy(), callbacks(), rng());
 
       state.set_expected_next(ENCRYPTED_EXTENSIONS);  // TODO expect CCS (middlebox compat)
 

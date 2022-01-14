@@ -28,7 +28,7 @@ class RandomNumberGenerator;
 namespace TLS {
 
 #if defined(BOTAN_HAS_TLS_13)
-class Key_Share_Content;
+class Key_Share_Entry;
 class Callbacks;
 #endif
 class Policy;
@@ -511,6 +511,16 @@ class Key_Share_Content
       virtual std::vector<uint8_t> serialize() const = 0;
       virtual bool empty() const = 0;
       virtual ~Key_Share_Content() = default;
+
+      virtual secure_vector<uint8_t> exchange(const Key_Share_Content*, const Policy&, Callbacks&, RandomNumberGenerator&) const
+         {
+         throw Invalid_Argument("exchange should only be called on Key_Share_ClientHello");
+         }
+
+      virtual const Key_Share_Entry& get_singleton_entry() const
+         {
+         throw Invalid_Argument("get_singleton_entry should only be called on Key_Share_ServerHello");
+         }
    };
 
 /**
@@ -527,6 +537,9 @@ class BOTAN_UNSTABLE_API Key_Share final : public Extension
       std::vector<uint8_t> serialize(Connection_Side whoami) const override;
 
       bool empty() const override;
+
+      // TODO: this will only work as client_keyshare.exchange(server_keyshare) for now
+      secure_vector<uint8_t> exchange(const Key_Share* peer_keyshare, const Policy& policy, Callbacks& cb, RandomNumberGenerator& rng) const;
 
       explicit Key_Share(TLS_Data_Reader& reader,
                          uint16_t extension_size,
