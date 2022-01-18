@@ -49,6 +49,9 @@ std::unique_ptr<Extension> make_extension(TLS_Data_Reader& reader, uint16_t code
       case TLSEXT_EXTENDED_MASTER_SECRET:
          return std::make_unique<Extended_Master_Secret>(reader, size);
 
+      case TLSEXT_RECORD_SIZE_LIMIT:
+         return std::make_unique<Record_Size_Limit>(reader, size);
+
       case TLSEXT_ENCRYPT_THEN_MAC:
          return std::make_unique<Encrypt_then_MAC>(reader, size);
 
@@ -632,6 +635,29 @@ bool Supported_Versions::supports(Protocol_Version version) const
          return true;
    return false;
    }
+
+
+
+Record_Size_Limit::Record_Size_Limit(TLS_Data_Reader& reader, uint16_t extension_size)
+   {
+   if(extension_size != 2)
+      {
+      throw Decoding_Error("invalid record_size_limit extension");
+      }
+
+   m_limit = reader.get_uint16_t();
+}
+
+std::vector<uint8_t> Record_Size_Limit::serialize(Connection_Side) const
+   {
+   std::vector<uint8_t> buf;
+
+   buf.push_back(get_byte<0>(m_limit));
+   buf.push_back(get_byte<1>(m_limit));
+
+   return buf;
+   }
+
 
 #if defined(BOTAN_HAS_TLS_13)
 Cookie::Cookie(const std::vector<uint8_t>& cookie) :

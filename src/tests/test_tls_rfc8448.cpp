@@ -122,9 +122,6 @@ void compare_extensions(const std::vector<uint8_t> &exts_buffer, const std::vect
    for (const auto &eext : exp)
    {
       switch (eext.first) {
-        case Botan::TLS::Handshake_Extension_Type::TLSEXT_RECORD_SIZE_LIMIT:
-           result.test_note(std::string("ignoring not yet implemented extension record_size_limit"));
-           continue;
         case Botan::TLS::Handshake_Extension_Type::TLSEXT_PSK_KEY_EXCHANGE_MODES:
            result.test_note(std::string("ignoring not yet implemented extension psk_key_exchange_modes"));
            continue;

@@ -49,7 +49,6 @@ enum Handshake_Extension_Type {
    TLSEXT_ENCRYPT_THEN_MAC          = 22,
    TLSEXT_EXTENDED_MASTER_SECRET    = 23,
 
-   // TODO: not implemented (RFC 8449)
    TLSEXT_RECORD_SIZE_LIMIT         = 28,
 
    TLSEXT_SESSION_TICKET            = 35,
@@ -449,6 +448,34 @@ class BOTAN_UNSTABLE_API Supported_Versions final : public Extension
       const std::vector<Protocol_Version> versions() const { return m_versions; }
    private:
       std::vector<Protocol_Version> m_versions;
+   };
+
+/**
+* Record Size Limit (RFC 8449)
+*
+* TODO: the record size limit will currently not be honored by the record protocol
+*/
+class BOTAN_UNSTABLE_API Record_Size_Limit final : public Extension
+   {
+   public:
+      static Handshake_Extension_Type static_type()
+         { return TLSEXT_RECORD_SIZE_LIMIT; }
+
+      Handshake_Extension_Type type() const override { return static_type(); }
+
+      explicit Record_Size_Limit(const uint16_t limit) :
+         m_limit(limit) {}
+
+      Record_Size_Limit(TLS_Data_Reader& reader, uint16_t extension_size);
+
+      uint16_t limit() const { return m_limit; }
+
+      std::vector<uint8_t> serialize(Connection_Side whoami) const override;
+
+      bool empty() const override { return m_limit == 0; }
+
+   private:
+      uint16_t m_limit;
    };
 
 using Named_Group = Group_Params;

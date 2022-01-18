@@ -55,6 +55,12 @@ Client_Hello_Impl_13::Client_Hello_Impl_13(Handshake_IO& io,
 
    m_extensions.add(new Supported_Versions(client_settings.protocol_version(), policy));
 
+   if (policy.record_size_limit().has_value())
+      {
+      m_extensions.add(new Record_Size_Limit(policy.record_size_limit().value()));
+      }
+
+
    cb.tls_modify_extensions(m_extensions, CLIENT);
 
    hash.update(io.send(*this));
