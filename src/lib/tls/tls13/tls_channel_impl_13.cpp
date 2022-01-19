@@ -122,10 +122,7 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
                                                          record.sequence());
 
              auto msg = m_handshake_state->get_next_handshake_msg();
-             process_handshake_msg(/*active_state*/ nullptr,
-                                   *m_handshake_state.get(),
-                                   msg.first, msg.second,
-                                   /*epoch0_restart*/ false);
+             process_handshake_msg(*m_handshake_state.get(), msg.first, msg.second);
 
             }
          else if (record.type() == CHANGE_CIPHER_SPEC)

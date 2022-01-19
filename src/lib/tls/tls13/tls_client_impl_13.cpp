@@ -86,18 +86,11 @@ void Client_Impl_13::initiate_handshake(Handshake_State& state,
    BOTAN_UNUSED(state, force_full_renegotiation);
    }
 
-void Client_Impl_13::process_handshake_msg(const Handshake_State* previous_state,
+void Client_Impl_13::process_handshake_msg(
       Handshake_State& state,
       Handshake_Type type,
-      const std::vector<uint8_t>& contents,
-      bool epoch0_restart)
+      const std::vector<uint8_t>& contents)
    {
-   // there cannot be a previous state in TLS 1.3 as renegotiation is not allowed
-   BOTAN_ASSERT_NOMSG(previous_state == nullptr);
-
-   // does not apply on client side
-   BOTAN_ASSERT_NOMSG(epoch0_restart == false);
-
    state.confirm_transition_to(type);
 
    if(type == SERVER_HELLO)

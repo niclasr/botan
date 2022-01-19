@@ -125,6 +125,11 @@ class Channel_Impl_13 : public Channel_Impl
       RandomNumberGenerator& rng() { return m_rng; }
       const Policy& policy() const { return m_policy; }
 
+      virtual void process_handshake_msg(Handshake_State& active_state,
+                                         Handshake_Type type,
+                                         const std::vector<uint8_t>& contents) = 0;
+
+
    private:
       const Handshake_State* handshake_state() const { return m_handshake_state.get(); }
 
