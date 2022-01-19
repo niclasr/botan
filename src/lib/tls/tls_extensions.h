@@ -667,6 +667,11 @@ class BOTAN_UNSTABLE_API Extensions final
          return get(type) != nullptr;
          }
 
+      size_t size() const
+         {
+         return m_extensions.size();
+         }
+
       void add(std::unique_ptr<Extension> extn)
          {
          m_extensions.emplace_back(std::move(extn.release()));
@@ -690,6 +695,24 @@ class BOTAN_UNSTABLE_API Extensions final
       std::vector<uint8_t> serialize(Connection_Side whoami) const;
 
       void deserialize(TLS_Data_Reader& reader, Connection_Side from);
+
+      /**
+       * Take the extension with the given type out of the extensions list.
+       * Returns a nullptr if the extension didn't exist.
+       */
+      std::unique_ptr<Extension> take(Handshake_Extension_Type type);
+
+      /**
+      * Remove an extension from this extensions object, if it exists.
+      * Returns true if the extension existed (and thus is now removed),
+      * otherwise false (the extension wasn't set in the first place).
+      *
+      * Note: not used internally, might be used in Callbacks::tls_modify_extensions()
+      */
+      bool remove_extension(Handshake_Extension_Type type)
+         {
+         return take(type) != nullptr;
+         }
 
       Extensions() = default;
 

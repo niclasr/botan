@@ -131,6 +131,9 @@ Botan::X509_Certificate server_certificate()
 class Test_TLS_13_Callbacks : public Botan::TLS::Callbacks
    {
    public:
+      Test_TLS_13_Callbacks(Test::Result &result)
+         : m_result(result) {}
+
       void tls_emit_data(const uint8_t data[], size_t size) override
          {
          send_buffer.insert(send_buffer.end(), data, data + size);
@@ -158,12 +161,43 @@ class Test_TLS_13_Callbacks : public Botan::TLS::Callbacks
          return false;
          }
 
+      void tls_modify_extensions(Botan::TLS::Extensions& exts, Botan::TLS::Connection_Side side) override
+         {
+         if (side == Botan::TLS::Connection_Side::CLIENT)
+            {
+            const std::vector<Botan::TLS::Handshake_Extension_Type> expected_order =
+               {
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_SERVER_NAME_INDICATION,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_SAFE_RENEGOTIATION,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_SUPPORTED_GROUPS,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_SESSION_TICKET,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_KEY_SHARE,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_SUPPORTED_VERSIONS,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_SIGNATURE_ALGORITHMS,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_PSK_KEY_EXCHANGE_MODES,
+               Botan::TLS::Handshake_Extension_Type::TLSEXT_RECORD_SIZE_LIMIT
+               };
+
+            m_result.test_eq("number of extensions", exts.size(), expected_order.size());
+
+            for (const auto ext_type : expected_order)
+               {
+               auto ext = exts.take(ext_type);
+               if (m_result.confirm("extension was produced", ext != nullptr))
+                  {
+                  exts.add(std::move(ext));
+                  }
+               }
+            }
+         }
+
       std::vector<uint8_t> pull_send_buffer() {
          return std::exchange(send_buffer, std::vector<uint8_t>());
       }
 
    private:
       std::vector<uint8_t> send_buffer;
+      Test::Result&        m_result;
    };
 
 class Test_Server_Credentials : public Botan::Credentials_Manager
@@ -233,8 +267,10 @@ class RFC8448_Text_Policy : public Botan::TLS::Text_Policy
 class TLS_Context
    {
    protected:
-      TLS_Context(std::unique_ptr<Botan::RandomNumberGenerator> rng_in)
-         : rng(std::move(rng_in))
+      TLS_Context(Test::Result& result,
+                  std::unique_ptr<Botan::RandomNumberGenerator> rng_in)
+         : callbacks(result)
+         , rng(std::move(rng_in))
          , session_mgr(*rng)
          , policy(read_tls_policy("rfc8448"))
          {}
@@ -256,8 +292,9 @@ class TLS_Context
 class Server_Context : public TLS_Context
    {
    public:
-      Server_Context(std::unique_ptr<Botan::RandomNumberGenerator> rng_in)
-         : TLS_Context(std::move(rng_in))
+      Server_Context(Test::Result& result,
+                     std::unique_ptr<Botan::RandomNumberGenerator> rng_in)
+         : TLS_Context(result, std::move(rng_in))
          , server(callbacks, session_mgr, creds, policy, *rng)
          {}
 
@@ -267,8 +304,9 @@ class Server_Context : public TLS_Context
 class Client_Context : public TLS_Context
    {
    public:
-      Client_Context(std::unique_ptr<Botan::RandomNumberGenerator> rng_in)
-         : TLS_Context(std::move(rng_in))
+      Client_Context(Test::Result& result,
+                     std::unique_ptr<Botan::RandomNumberGenerator> rng_in)
+         : TLS_Context(result, std::move(rng_in))
          , client(callbacks, session_mgr, creds, policy, *rng,
                   Botan::TLS::Server_Information("server"),
                   Botan::TLS::Protocol_Version::TLS_V13)
@@ -294,7 +332,7 @@ class Test_TLS_RFC8448 final : public Test
          // for KeyShare extension (RFC 8448: "{client} create an ephemeral x25519 key pair")
          add_entropy(*rng, "49af42ba7f7994852d713ef2784bcbcaa7911de26adc5642cb634540e7ea5005");
 
-         Client_Context ctx(std::move(rng));
+         Client_Context ctx(result, std::move(rng));
          result.confirm("client not closed", !ctx.client.is_closed());
 
          auto client_hello_record = ctx.pull_send_buffer();
@@ -345,10 +383,12 @@ class Test_TLS_RFC8448 final : public Test
                         indicated_hello_length);
 
          Botan::TLS::Client_Hello hello(client_hello);
-         result.test_eq("only one supported version", hello.supported_versions().size(), 1);
-         result.test_int_eq("Supported Version is 1.3",
-                            hello.supported_versions().front().version_code(),
-                            Botan::TLS::Protocol_Version::TLS_V13);
+         if (result.test_eq("only one supported version", hello.supported_versions().size(), 1))
+            {
+            result.test_int_eq("Supported Version is 1.3",
+                               hello.supported_versions().front().version_code(),
+                               Botan::TLS::Protocol_Version::TLS_V13);
+            }
 
          // ----
 
@@ -427,7 +467,7 @@ class Test_TLS_RFC8448 final : public Test
          {
          Test::Result result("Simple 1-RTT (Server side)");
 
-         Server_Context ctx(std::make_unique<Botan::AutoSeeded_RNG>());
+         Server_Context ctx(result, std::make_unique<Botan::AutoSeeded_RNG>());
 
          // Cipher Suites in this client hello:
          //   AES_128_GCM_SHA256

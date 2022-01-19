@@ -107,6 +107,23 @@ void Extensions::deserialize(TLS_Data_Reader& reader, Connection_Side from)
       }
    }
 
+std::unique_ptr<Extension> Extensions::take(Handshake_Extension_Type type)
+   {
+   const auto i = std::find_if(m_extensions.begin(), m_extensions.end(),
+                               [type](const auto &ext) {
+                                  return ext->type() == type;
+                               });
+
+   std::unique_ptr<Extension> result;
+   if (i != m_extensions.end())
+      {
+      std::swap(result, *i);
+      m_extensions.erase(i);
+      }
+
+   return result;
+   }
+
 std::vector<uint8_t> Extensions::serialize(Connection_Side whoami) const
    {
    std::vector<uint8_t> buf(2); // 2 bytes for length field

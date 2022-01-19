@@ -164,6 +164,8 @@ void Client_Impl_13::send_client_hello(Handshake_State& state_base,
 
    state.set_expected_next(SERVER_HELLO);
 
+   // TODO: also expect HelloRetryRequest, I guess
+
    if(!state.client_hello())
       {
       Client_Hello::Settings client_settings(version, m_info.hostname());
