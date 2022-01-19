@@ -65,6 +65,9 @@ std::unique_ptr<Extension> make_extension(TLS_Data_Reader& reader, uint16_t code
       case TLSEXT_COOKIE:
          return std::make_unique<Cookie>(reader, size);
 
+      case TLSEXT_PSK_KEY_EXCHANGE_MODES:
+         return std::make_unique<PSK_Key_Exchange_Modes>(reader, size);
+
       case TLSEXT_SIGNATURE_ALGORITHMS_CERT:
          return std::make_unique<Signature_Algorithms_Cert>(reader, size);
 
@@ -707,6 +710,41 @@ std::vector<uint8_t> Cookie::serialize(Connection_Side /*whoami*/) const
       }
 
    return buf;
+   }
+
+
+std::vector<uint8_t> PSK_Key_Exchange_Modes::serialize(Connection_Side) const
+   {
+   std::vector<uint8_t> buf;
+
+   BOTAN_ASSERT_NOMSG(m_modes.size() < 256);
+   buf.push_back(static_cast<uint8_t>(m_modes.size()));
+   for (const auto& mode : m_modes)
+      {
+      buf.push_back(static_cast<uint8_t>(mode));
+      }
+
+   return buf;
+   }
+
+PSK_Key_Exchange_Modes::PSK_Key_Exchange_Modes(TLS_Data_Reader& reader, uint16_t extension_size)
+   {
+   if (extension_size < 2)
+      {
+      throw Decoding_Error("Empty psk_key_exchange_modes extension is illegal");
+      }
+
+   const auto mode_count = reader.get_byte();
+   for(uint16_t i = 0; i < mode_count; ++i)
+      {
+      const uint16_t mode = reader.get_byte();
+      if (mode != 0 && mode != 1)
+         {
+         throw Decoding_Error("Unexpected PSK mode: " + std::to_string(mode));
+         }
+
+      m_modes.push_back(PSK_Key_Exchange_Mode(mode));
+      }
    }
 
 Signature_Algorithms_Cert::Signature_Algorithms_Cert(const std::vector<Signature_Scheme>& schemes)

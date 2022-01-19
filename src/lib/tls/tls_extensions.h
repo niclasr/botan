@@ -30,6 +30,12 @@ namespace TLS {
 #if defined(BOTAN_HAS_TLS_13)
 class Key_Share_Entry;
 class Callbacks;
+
+enum class PSK_Key_Exchange_Mode : uint8_t {
+   PSK_KE = 0,
+   PSK_DHE_KE = 1
+};
+
 #endif
 class Policy;
 class TLS_Data_Reader;
@@ -57,7 +63,6 @@ enum Handshake_Extension_Type {
 #if defined(BOTAN_HAS_TLS_13)
    TLSEXT_COOKIE                    = 44,
 
-   // TODO: not implemented
    TLSEXT_PSK_KEY_EXCHANGE_MODES    = 45,
 
    TLSEXT_SIGNATURE_ALGORITHMS_CERT = 50,
@@ -506,6 +511,33 @@ class BOTAN_UNSTABLE_API Cookie final : public Extension
    private:
       std::vector<uint8_t> m_cookie;
    };
+
+/**
+* Pre-Shared Key Exchange Modes from RFC 8446 4.2.9
+*/
+class BOTAN_UNSTABLE_API PSK_Key_Exchange_Modes final : public Extension
+   {
+   public:
+      static Handshake_Extension_Type static_type()
+         { return TLSEXT_PSK_KEY_EXCHANGE_MODES; }
+
+      Handshake_Extension_Type type() const override { return static_type(); }
+
+      std::vector<uint8_t> serialize(Connection_Side whoami) const override;
+
+      bool empty() const override { return m_modes.empty(); }
+
+      const std::vector<PSK_Key_Exchange_Mode>& modes() const { return m_modes; }
+
+      explicit PSK_Key_Exchange_Modes(std::vector<PSK_Key_Exchange_Mode> modes)
+         : m_modes(std::move(modes)) {}
+
+      explicit PSK_Key_Exchange_Modes(TLS_Data_Reader& reader, uint16_t extension_size);
+
+   private:
+      std::vector<PSK_Key_Exchange_Mode> m_modes;
+   };
+
 
 /**
 * Signature_Algorithms_Cert from RFC 8446

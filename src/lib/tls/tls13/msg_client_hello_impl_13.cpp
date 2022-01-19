@@ -55,6 +55,8 @@ Client_Hello_Impl_13::Client_Hello_Impl_13(Handshake_IO& io,
 
    m_extensions.add(new Supported_Versions(client_settings.protocol_version(), policy));
 
+   m_extensions.add(new PSK_Key_Exchange_Modes({PSK_Key_Exchange_Mode::PSK_DHE_KE}));
+
    if (policy.record_size_limit().has_value())
       {
       m_extensions.add(new Record_Size_Limit(policy.record_size_limit().value()));

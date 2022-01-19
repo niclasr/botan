@@ -121,12 +121,6 @@ void compare_extensions(const std::vector<uint8_t> &exts_buffer, const std::vect
 
    for (const auto &eext : exp)
    {
-      switch (eext.first) {
-        case Botan::TLS::Handshake_Extension_Type::TLSEXT_PSK_KEY_EXCHANGE_MODES:
-           result.test_note(std::string("ignoring not yet implemented extension psk_key_exchange_modes"));
-           continue;
-      }
-
       const auto &pext = prod.find(eext.first);
       if (!result.confirm("expected extension is present", pext != prod.end())) {
          result.test_note(std::string("expected to produce TLS extension: ") + std::to_string(eext.first));
