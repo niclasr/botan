@@ -16,9 +16,10 @@
 #include <botan/tls_version.h>
 #include <botan/secmem.h>
 #include <botan/pkix_types.h>
+
+#include <algorithm>
 #include <vector>
 #include <string>
-#include <map>
 #include <set>
 
 namespace Botan {
@@ -661,35 +662,34 @@ class BOTAN_UNSTABLE_API Extensions final
          return get<T>() != nullptr;
          }
 
+      bool has(Handshake_Extension_Type type) const
+         {
+         return get(type) != nullptr;
+         }
+
       void add(std::unique_ptr<Extension> extn)
          {
-         m_extensions[extn->type()].reset(extn.release());
+         m_extensions.emplace_back(std::move(extn.release()));
          }
 
       void add(Extension* extn)
          {
-         m_extensions[extn->type()].reset(extn);
+         m_extensions.emplace_back(extn);
          }
 
       Extension* get(Handshake_Extension_Type type) const
          {
-         auto i = m_extensions.find(type);
+         const auto i = std::find_if(m_extensions.cbegin(), m_extensions.cend(),
+                                     [type](const auto &ext) {
+                                        return ext->type() == type;
+                                     });
 
-         if(i != m_extensions.end())
-            return i->second.get();
-         return nullptr;
+         return (i != m_extensions.end()) ? i->get() : nullptr;
          }
 
       std::vector<uint8_t> serialize(Connection_Side whoami) const;
 
       void deserialize(TLS_Data_Reader& reader, Connection_Side from);
-
-      /**
-      * Remove an extension from this extensions object, if it exists.
-      * Returns true if the extension existed (and thus is now removed),
-      * otherwise false (the extension wasn't set in the first place).
-      */
-      bool remove_extension(Handshake_Extension_Type typ);
 
       Extensions() = default;
 
@@ -702,7 +702,7 @@ class BOTAN_UNSTABLE_API Extensions final
       Extensions(const Extensions&) = delete;
       Extensions& operator=(const Extensions&) = delete;
 
-      std::map<Handshake_Extension_Type, std::unique_ptr<Extension>> m_extensions;
+      std::vector<std::unique_ptr<Extension>> m_extensions;
    };
 
 }

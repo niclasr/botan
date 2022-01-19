@@ -98,7 +98,7 @@ void Extensions::deserialize(TLS_Data_Reader& reader, Connection_Side from)
 
          const auto type = static_cast<Handshake_Extension_Type>(extension_code);
 
-         if(m_extensions.find(type) != m_extensions.end())
+         if(has(type))
             throw TLS_Exception(TLS::Alert::DECODE_ERROR,
                                 "Peer sent duplicated extensions");
 
@@ -111,14 +111,14 @@ std::vector<uint8_t> Extensions::serialize(Connection_Side whoami) const
    {
    std::vector<uint8_t> buf(2); // 2 bytes for length field
 
-   for(auto& extn : m_extensions)
+   for(const auto& extn : m_extensions)
       {
-      if(extn.second->empty())
+      if(extn->empty())
          continue;
 
-      const uint16_t extn_code = static_cast<uint16_t>(extn.second->type());
+      const uint16_t extn_code = static_cast<uint16_t>(extn->type());
 
-      const std::vector<uint8_t> extn_val = extn.second->serialize(whoami);
+      const std::vector<uint8_t> extn_val = extn->serialize(whoami);
 
       buf.push_back(get_byte<0>(extn_code));
       buf.push_back(get_byte<1>(extn_code));
@@ -141,20 +141,13 @@ std::vector<uint8_t> Extensions::serialize(Connection_Side whoami) const
    return buf;
    }
 
-bool Extensions::remove_extension(Handshake_Extension_Type typ)
-   {
-   auto i = m_extensions.find(typ);
-   if(i == m_extensions.end())
-      return false;
-   m_extensions.erase(i);
-   return true;
-   }
-
 std::set<Handshake_Extension_Type> Extensions::extension_types() const
    {
    std::set<Handshake_Extension_Type> offers;
-   for(auto i = m_extensions.begin(); i != m_extensions.end(); ++i)
-      offers.insert(i->first);
+   std::transform(m_extensions.cbegin(), m_extensions.cend(),
+                  std::inserter(offers, offers.begin()), [] (const auto &ext) {
+                     return ext->type();
+                  });
    return offers;
    }
 
@@ -737,7 +730,7 @@ PSK_Key_Exchange_Modes::PSK_Key_Exchange_Modes(TLS_Data_Reader& reader, uint16_t
    const auto mode_count = reader.get_byte();
    for(uint16_t i = 0; i < mode_count; ++i)
       {
-      const uint16_t mode = reader.get_byte();
+      const uint8_t mode = reader.get_byte();
       if (mode != 0 && mode != 1)
          {
          throw Decoding_Error("Unexpected PSK mode: " + std::to_string(mode));
