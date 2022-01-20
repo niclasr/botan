@@ -46,6 +46,14 @@ class Finished;
 
 /**
 * SSL/TLS Handshake State
+*
+* This is a data holder object for all state aggregated during the handshake,
+* both on client and server side and across protocol versions.
+* It does not implement any logic and offers no guarantees regarding state
+* consistency and legal TLS state transitions.
+*
+* TODO: currently it implements some logic for TLS 1.2, which should be removed
+* TODO: investigate moving the handshake_io to the channel
 */
 class Handshake_State
    {

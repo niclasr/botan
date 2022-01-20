@@ -121,8 +121,8 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
                                                          record.type(),
                                                          record.sequence());
 
-             auto msg = m_handshake_state->get_next_handshake_msg();
-             process_handshake_msg(*m_handshake_state.get(), msg.first, msg.second);
+            auto msg = m_handshake_state->get_next_handshake_msg();
+            process_handshake_msg(*m_handshake_state.get(), msg.first, msg.second);
 
             }
          else if (record.type() == CHANGE_CIPHER_SPEC)
