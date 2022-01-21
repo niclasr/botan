@@ -9,6 +9,7 @@ TLS_13 -> 20210721
 msg_client_hello_impl_13.h
 tls_channel_impl_13.h
 tls_client_impl_13.h
+tls_record_layer_13.h
 </header:internal>
 
 <requires>

@@ -26,6 +26,8 @@ enum Size_Limits {
    MAX_PLAINTEXT_SIZE = 16*1024,
    MAX_COMPRESSED_SIZE = MAX_PLAINTEXT_SIZE + 1024,
    MAX_CIPHERTEXT_SIZE = MAX_COMPRESSED_SIZE + 1024,
+
+   MAX_CIPHERTEXT_SIZE_TLS13 = MAX_PLAINTEXT_SIZE + 256
 };
 
 // This will become an enum class in a future major release
