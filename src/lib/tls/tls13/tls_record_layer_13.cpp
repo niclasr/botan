@@ -105,12 +105,28 @@ Record_Layer::received_data(std::vector<uint8_t> data_from_peer)
       {
       TLS_Data_Reader reader("TLS 1.3 record", data_from_peer);
 
-      TLSPlaintext_Header plaintext_header(reader);
+      std::vector<Record> records_received;
 
+      TLSPlaintext_Header plaintext_header(reader);
       check_enough_bytes(reader, plaintext_header.fragment_length);
 
+      if (plaintext_header.type == Record_Type::CHANGE_CIPHER_SPEC)
+         {
+         // RFC 8446 5.
+         //    An implementation may receive an unencrypted record of type
+         //    change_cipher_spec consisting of the single byte value 0x01
+         //    at any time [...]. An implementation which receives any other
+         //    change_cipher_spec value or which receives a protected
+         //    change_cipher_spec record MUST abort the handshake [...].
+         if (plaintext_header.fragment_length != 1 || reader.get_byte() != 0x01)
+            throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
+                                "unexpected change cipher spec record received");
 
-      return std::vector<Record>{};
+         records_received.emplace_back(Record_Type::CHANGE_CIPHER_SPEC, secure_vector<uint8_t>());
+         }
+
+
+      return records_received;
       }
    catch (const More_Bytes_Needed &needs)
       {

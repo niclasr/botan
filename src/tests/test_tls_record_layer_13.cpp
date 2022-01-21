@@ -71,6 +71,12 @@ class Test_TLS_Record_Layer_13 final : public Test
             TLS::Record_Layer().received_data(invalid_record_version);
          });
 
+         // unexpected change cipher spec
+         std::vector<uint8_t> invalid_ccs_record{'\x14', '\x03', '\x03', '\x00', '\x01', '\x02'};
+         result.test_throws("invalid CCS record", "unexpected change cipher spec record received", [&] {
+            TLS::Record_Layer().received_data(invalid_ccs_record);
+         });
+
          return result;
          }
 
