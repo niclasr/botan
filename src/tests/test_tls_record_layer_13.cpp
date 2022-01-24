@@ -29,11 +29,23 @@ Test::Result CHECK(const char* name, FunT check_fun)
 
 std::vector<Test::Result> read_full_records()
    {
+   const auto client_hello_record = Botan::hex_decode(  // from RFC 8448
+      "16 03 01 00 c4 01 00 00 c0 03 03 cb"
+      "34 ec b1 e7 81 63 ba 1c 38 c6 da cb 19 6a 6d ff a2 1a 8d 99 12"
+      "ec 18 a2 ef 62 83 02 4d ec e7 00 00 06 13 01 13 03 13 02 01 00"
+      "00 91 00 00 00 0b 00 09 00 00 06 73 65 72 76 65 72 ff 01 00 01"
+      "00 00 0a 00 14 00 12 00 1d 00 17 00 18 00 19 01 00 01 01 01 02"
+      "01 03 01 04 00 23 00 00 00 33 00 26 00 24 00 1d 00 20 99 38 1d"
+      "e5 60 e4 bd 43 d2 3d 8e 43 5a 7d ba fe b3 c0 6e 51 c1 3c ae 4d"
+      "54 13 69 1e 52 9a af 2c 00 2b 00 03 02 03 04 00 0d 00 20 00 1e"
+      "04 03 05 03 06 03 02 03 08 04 08 05 08 06 04 01 05 01 06 01 02"
+      "01 04 02 05 02 06 02 02 02 00 2d 00 02 01 01 00 1c 00 02 40 01");
+   const auto ccs_record = Botan::hex_decode("14 03 03 00 01 01");
+
    return
       {
-      CHECK("change cipher spec", [](auto& result)
+      CHECK("change cipher spec", [&](auto& result)
          {
-         std::vector<uint8_t> ccs_record{'\x14', '\x03', '\x03', '\x00', '\x01', '\x01'};
          auto read = TLS::Record_Layer().received_data(ccs_record);
          if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
             {
@@ -44,10 +56,10 @@ std::vector<Test::Result> read_full_records()
             }
          }),
 
-      CHECK("two CCS messages", [](auto& result)
+      CHECK("two CCS messages", [&](auto& result)
          {
-         std::vector<uint8_t> two_ccs_records{'\x14', '\x03', '\x03', '\x00', '\x01', '\x01',
-                                              '\x14', '\x03', '\x03', '\x00', '\x01', '\x01'};
+         const auto two_ccs_records = Botan::concat(ccs_record, ccs_record);
+
          auto read = TLS::Record_Layer().received_data(two_ccs_records);
          if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
             {
@@ -60,29 +72,34 @@ std::vector<Test::Result> read_full_records()
             }
          }),
 
-      CHECK("read full handshake message", [](auto& result)
+      CHECK("read full handshake message", [&](auto& result)
          {
-         const auto client_hello = Botan::hex_decode(  // from RFC 8448
-                                      "16 03 01 00 c4 01 00 00 c0 03 03 cb"
-                                      "34 ec b1 e7 81 63 ba 1c 38 c6 da cb 19 6a 6d ff a2 1a 8d 99 12"
-                                      "ec 18 a2 ef 62 83 02 4d ec e7 00 00 06 13 01 13 03 13 02 01 00"
-                                      "00 91 00 00 00 0b 00 09 00 00 06 73 65 72 76 65 72 ff 01 00 01"
-                                      "00 00 0a 00 14 00 12 00 1d 00 17 00 18 00 19 01 00 01 01 01 02"
-                                      "01 03 01 04 00 23 00 00 00 33 00 26 00 24 00 1d 00 20 99 38 1d"
-                                      "e5 60 e4 bd 43 d2 3d 8e 43 5a 7d ba fe b3 c0 6e 51 c1 3c ae 4d"
-                                      "54 13 69 1e 52 9a af 2c 00 2b 00 03 02 03 04 00 0d 00 20 00 1e"
-                                      "04 03 05 03 06 03 02 03 08 04 08 05 08 06 04 01 05 01 06 01 02"
-                                      "01 04 02 05 02 06 02 02 02 00 2d 00 02 01 01 00 1c 00 02 40 01");
-
-         auto read = TLS::Record_Layer().received_data(client_hello);
+         auto read = TLS::Record_Layer().received_data(client_hello_record);
          if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
             {
             auto rec = std::get<std::vector<TLS::Record>>(read);
             result.test_eq("received 1 record", rec.size(), 1);
             result.confirm("received handshake record", rec.front().type == TLS::Record_Type::HANDSHAKE);
             result.test_eq("contains the full handshake message",
-                           Botan::secure_vector<uint8_t>(client_hello.begin()+TLS::TLS_HEADER_SIZE,
-                                 client_hello.end()), rec.front().fragment);
+                           Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
+                                 client_hello_record.end()), rec.front().fragment);
+            }
+         }),
+
+      CHECK("read full handshake message followed by CCS", [&](auto& result)
+         {
+         const auto payload = Botan::concat(client_hello_record, ccs_record);
+         auto read = TLS::Record_Layer().received_data(payload);
+         if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
+            {
+            auto rec = std::get<std::vector<TLS::Record>>(read);
+            result.test_eq("received 2 records", rec.size(), 2);
+            result.confirm("received handshake record", rec.front().type == TLS::Record_Type::HANDSHAKE);
+            result.test_eq("contains the full handshake message",
+                           Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
+                                 client_hello_record.end()), rec.front().fragment);
+            result.confirm("received CCS record", rec.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            result.confirm("CCS bears no data", rec.back().fragment.empty());
             }
          })
       };
