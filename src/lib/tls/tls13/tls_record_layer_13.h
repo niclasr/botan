@@ -53,10 +53,16 @@ public:
     * with processing TLS records or a list of plaintext TLS record contents
     * containing higher level protocol or application data.
     */
-   ReadResult<std::vector<Record>> received_data(const std::vector<uint8_t>& data_from_peer);
+   ReadResult<std::vector<Record>> parse_records(const std::vector<uint8_t>& data_from_peer);
+
+   std::vector<uint8_t> prepare_records(const Record_Type type,
+                                        const uint8_t data[], size_t size);
+
+   std::vector<uint8_t> prepare_dummy_ccs_record();
 
 private:
    ReadResult<Record> read_record();
+   void decrypt(Record& record);
 
 private:
    std::vector<uint8_t> m_buffer;

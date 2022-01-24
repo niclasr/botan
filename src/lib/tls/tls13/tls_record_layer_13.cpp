@@ -17,6 +17,21 @@ namespace Botan::TLS {
 
 namespace {
 
+template <typename IteratorT>
+bool verify_change_cipher_spec(const IteratorT data, const size_t size)
+{
+   // RFC 8446 5.
+   //    An implementation may receive an unencrypted record of type
+   //    change_cipher_spec consisting of the single byte value 0x01
+   //    at any time [...]. An implementation which receives any other
+   //    change_cipher_spec value or which receives a protected
+   //    change_cipher_spec record MUST abort the handshake [...].
+   const size_t expected_fragment_length = 1;
+   const uint8_t expected_fragment_byte = 0x01;
+   return (size == expected_fragment_length &&
+          *data == expected_fragment_byte);
+}
+
 /**
  * RFC 8446 5.1 `TLSPlaintext` without the `fragment` payload data
  */
@@ -72,7 +87,7 @@ struct TLSPlaintext_Header
 }  // namespace
 
 Record_Layer::ReadResult<std::vector<Record>>
-Record_Layer::received_data(const std::vector<uint8_t>& data_from_peer)
+Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer)
 {
    std::vector<Record> records_received;
 
@@ -92,6 +107,50 @@ Record_Layer::received_data(const std::vector<uint8_t>& data_from_peer)
       }
 }
 
+std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
+                                                   const uint8_t data[],
+                                                   size_t size)
+   {
+   BOTAN_ASSERT_NOMSG(type != Record_Type::APPLICATION_DATA); // not implemented yet
+
+   if (type == Record_Type::CHANGE_CIPHER_SPEC &&
+       !verify_change_cipher_spec(data, size))
+      {
+      throw Invalid_Argument("TLS 1.3 deprecated CHANGE_CIPHER_SPEC");
+      }
+
+   std::vector<uint8_t> output;
+   output.reserve(size + ((size / MAX_PLAINTEXT_SIZE) + 1) * TLS_HEADER_SIZE);
+
+   size_t offset = 0;
+   while(size > 0)
+      {
+      const size_t sending = std::min<size_t>(size, MAX_PLAINTEXT_SIZE);
+
+      output.emplace_back(static_cast<uint8_t>(type));
+      output.emplace_back(0x03);
+      output.emplace_back(0x03);
+
+      const auto u16_size = static_cast<uint16_t>(sending);
+      output.emplace_back(get_byte<0>(u16_size));
+      output.emplace_back(get_byte<1>(u16_size));
+
+      output.insert(output.end(), data + offset, data + offset + sending);
+
+      offset += sending;
+      size -= sending;
+      }
+
+   return output;
+   }
+
+std::vector<uint8_t> Record_Layer::prepare_dummy_ccs_record()
+   {
+   uint8_t data = 0x01;
+   return prepare_records(Record_Type::CHANGE_CIPHER_SPEC, &data, 1);
+   }
+
+
 Record_Layer::ReadResult<Record> Record_Layer::read_record()
    {
    if (m_buffer.size() < TLS_HEADER_SIZE)
@@ -110,27 +169,25 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
    const auto fragment_begin = header_begin + TLS_HEADER_SIZE;
    const auto fragment_end   = fragment_begin + plaintext_header.fragment_length;
 
-   if (plaintext_header.type == Record_Type::CHANGE_CIPHER_SPEC)
+   if (plaintext_header.type == Record_Type::CHANGE_CIPHER_SPEC &&
+       !verify_change_cipher_spec(fragment_begin, plaintext_header.fragment_length))
       {
-      // RFC 8446 5.
-      //    An implementation may receive an unencrypted record of type
-      //    change_cipher_spec consisting of the single byte value 0x01
-      //    at any time [...]. An implementation which receives any other
-      //    change_cipher_spec value or which receives a protected
-      //    change_cipher_spec record MUST abort the handshake [...].
-      const size_t expected_fragment_length = 1;
-      const uint8_t expected_fragment_byte = 0x01;
-      if (plaintext_header.fragment_length != expected_fragment_length ||
-          *fragment_begin != expected_fragment_byte)
-         throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
-                             "malformed change cipher spec record received");
+      throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
+                          "malformed change cipher spec record received");
       }
 
    Record record(plaintext_header.type,
                  secure_vector<uint8_t>(fragment_begin, fragment_end));
    m_buffer.erase(header_begin, fragment_end);
 
+   if (record.type == Record_Type::APPLICATION_DATA)
+      decrypt(record);
+
    return record;
    }
 
+void Record_Layer::decrypt(Record&)
+   {
+   // TBD
+   }
 }
