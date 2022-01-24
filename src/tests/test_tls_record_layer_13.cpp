@@ -227,14 +227,10 @@ std::vector<Test::Result> read_fragmented_records()
          })
       };
    }
-
-std::vector<Test::Result> run_all() {
-  return Botan::concat(read_full_records(), read_fragmented_records(), basic_sanitization());
-}
 }
 
 namespace Botan_Tests {
-BOTAN_REGISTER_TEST_FN("tls", "tls_record_layer_13", run_all);
+BOTAN_REGISTER_TEST_FN("tls", "tls_record_layer_13", read_full_records, read_fragmented_records, basic_sanitization);
 }
 
 #endif
