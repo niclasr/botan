@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <vector>
 #include <optional>
+#include <variant>
 
 namespace Botan {
 
@@ -528,25 +529,34 @@ class TestClassRegistration
    TestClassRegistration<Test_Class> reg_ ## Test_Class ## _tests(category, name)
 
 typedef Test::Result (*test_fn)();
+typedef std::vector<Test::Result> (*test_fns)();
 
 class FnTest : public Test
    {
    public:
-      FnTest(test_fn fn) : m_fn(fn) {}
+      FnTest(std::variant<test_fn, test_fns> fns) : m_fns(fns) {}
 
       std::vector<Test::Result> run() override
          {
-         return {m_fn()};
+         return std::visit([](auto&& fn) -> std::vector<Test::Result>
+            {
+            using T = std::decay_t<decltype(fn)>;
+            if constexpr (std::is_same_v<T, test_fn>)
+               return { fn() };
+            else
+               return fn();
+            },
+            m_fns);
          }
 
    private:
-      test_fn m_fn;
+      std::variant<test_fn, test_fns> m_fns;
    };
 
 class TestFnRegistration
    {
    public:
-      TestFnRegistration(const std::string& category, const std::string& name, test_fn fn)
+      TestFnRegistration(const std::string& category, const std::string& name, std::variant<test_fn, test_fns> fn)
          {
          auto test_maker = [=]() -> std::unique_ptr<Test> { return std::make_unique<FnTest>(fn); };
          Test::register_test(category, name, test_maker);
