@@ -38,7 +38,7 @@ private:
 
 void check_enough_bytes(const TLS_Data_Reader &reader, const BytesNeeded bytes_needed)
    {
-   if (reader.remaining_bytes() < bytes_needed) 
+   if (reader.remaining_bytes() < bytes_needed)
       {
       throw More_Bytes_Needed(bytes_needed - reader.remaining_bytes());
       }
@@ -60,7 +60,7 @@ struct TLSPlaintext_Header
       // RFC 8446 5.
       //    If a TLS implementation receives an unexpected record type,
       //    it MUST terminate the connection with an "unexpected_message" alert.
-      if (type != Record_Type::APPLICATION_DATA && 
+      if (type != Record_Type::APPLICATION_DATA &&
           type != Record_Type::HANDSHAKE        &&
           type != Record_Type::ALERT            &&
           type != Record_Type::CHANGE_CIPHER_SPEC)
@@ -124,21 +124,35 @@ Record_Layer::received_data(const std::vector<uint8_t>& data_from_peer)
             //    at any time [...]. An implementation which receives any other
             //    change_cipher_spec value or which receives a protected
             //    change_cipher_spec record MUST abort the handshake [...].
-            if (plaintext_header.fragment_length != 1 || reader->get_byte() != 0x01)
+            const size_t expected_fragment_length = 1;
+            const uint8_t expected_fragment_byte = 0x01;
+            if (plaintext_header.fragment_length != expected_fragment_length ||
+                reader->get_byte() != expected_fragment_byte)
                throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
                                    "unexpected change cipher spec record received");
 
-            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + 6);
+            // reset reader and buffer
+            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + TLS_HEADER_SIZE + plaintext_header.fragment_length);
             reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
+
             records_received.emplace_back(Record_Type::CHANGE_CIPHER_SPEC, secure_vector<uint8_t>());
+            }
+         else if (plaintext_header.type == Record_Type::HANDSHAKE || plaintext_header.type == Record_Type::ALERT)
+            {
+            records_received.emplace_back(plaintext_header.type,
+                reader->get_elem<uint8_t,
+                secure_vector<uint8_t>>(plaintext_header.fragment_length));
+
+            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + TLS_HEADER_SIZE + plaintext_header.fragment_length);
+            reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
             }
          else
             {
             // TODO: make this a valid implementation
             m_buffer.erase(m_buffer.begin(), m_buffer.begin() + TLS_HEADER_SIZE + plaintext_header.fragment_length);
             reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
-            records_received.emplace_back(plaintext_header.type,
-                                          secure_vector<uint8_t>(plaintext_header.fragment_length));
+
+            records_received.emplace_back(plaintext_header.type, secure_vector<uint8_t>(plaintext_header.fragment_length));
             }
          }
       }
