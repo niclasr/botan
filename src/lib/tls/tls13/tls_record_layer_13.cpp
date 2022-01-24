@@ -18,44 +18,15 @@ namespace Botan::TLS {
 namespace {
 
 /**
- * Thrown when some parsing code detects that it needs more bytes
- * Note: this is normal control flow implemented via an exception.
- *       waiting for C++'s std::expected<>
- */
-class More_Bytes_Needed : public Exception
-{
-public:
-   More_Bytes_Needed(BytesNeeded needed) : Exception("more!"), m_needed(needed) {}
-
-   BytesNeeded how_many() const
-      {
-      return m_needed;
-      }
-
-private:
-   BytesNeeded m_needed;
-};
-
-void check_enough_bytes(const TLS_Data_Reader &reader, const BytesNeeded bytes_needed)
-   {
-   if (reader.remaining_bytes() < bytes_needed)
-      {
-      throw More_Bytes_Needed(bytes_needed - reader.remaining_bytes());
-      }
-   }
-
-/**
  * RFC 8446 5.1 `TLSPlaintext` without the `fragment` payload data
  */
 struct TLSPlaintext_Header
 {
-   TLSPlaintext_Header(TLS_Data_Reader& reader)
+   TLSPlaintext_Header(std::vector<uint8_t>::const_iterator b)
       {
-      check_enough_bytes(reader, TLS_HEADER_SIZE);
-
-      type            = static_cast<Record_Type>(reader.get_byte());
-      legacy_version  = Protocol_Version(reader.get_uint16_t());
-      fragment_length = reader.get_uint16_t();
+      type            = static_cast<Record_Type>(*(b + 0));
+      legacy_version  = Protocol_Version(make_uint16(*(b + 1), *(b + 2)));
+      fragment_length = make_uint16(*(b + 3), *(b + 4));
 
       // RFC 8446 5.
       //    If a TLS implementation receives an unexpected record type,
@@ -105,64 +76,61 @@ Record_Layer::received_data(const std::vector<uint8_t>& data_from_peer)
 {
    std::vector<Record> records_received;
 
-   try
+   m_buffer.insert(m_buffer.end(), data_from_peer.cbegin(), data_from_peer.cend());
+   while (true)
       {
-      m_buffer.insert(m_buffer.end(), data_from_peer.cbegin(), data_from_peer.cend());
+      auto result = read_record();
 
-      auto reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
-
-      while (reader->has_remaining())
+      if (std::holds_alternative<BytesNeeded>(result))
          {
-         TLSPlaintext_Header plaintext_header(*reader);
-         check_enough_bytes(*reader, plaintext_header.fragment_length);
-
-         if (plaintext_header.type == Record_Type::CHANGE_CIPHER_SPEC)
-            {
-            // RFC 8446 5.
-            //    An implementation may receive an unencrypted record of type
-            //    change_cipher_spec consisting of the single byte value 0x01
-            //    at any time [...]. An implementation which receives any other
-            //    change_cipher_spec value or which receives a protected
-            //    change_cipher_spec record MUST abort the handshake [...].
-            const size_t expected_fragment_length = 1;
-            const uint8_t expected_fragment_byte = 0x01;
-            if (plaintext_header.fragment_length != expected_fragment_length ||
-                reader->get_byte() != expected_fragment_byte)
-               throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
-                                   "unexpected change cipher spec record received");
-
-            // reset reader and buffer
-            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + TLS_HEADER_SIZE + plaintext_header.fragment_length);
-            reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
-
-            records_received.emplace_back(Record_Type::CHANGE_CIPHER_SPEC, secure_vector<uint8_t>());
-            }
-         else if (plaintext_header.type == Record_Type::HANDSHAKE || plaintext_header.type == Record_Type::ALERT)
-            {
-            records_received.emplace_back(plaintext_header.type,
-                reader->get_elem<uint8_t,
-                secure_vector<uint8_t>>(plaintext_header.fragment_length));
-
-            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + TLS_HEADER_SIZE + plaintext_header.fragment_length);
-            reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
-            }
-         else
-            {
-            // TODO: make this a valid implementation
-            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + TLS_HEADER_SIZE + plaintext_header.fragment_length);
-            reader = std::make_unique<TLS_Data_Reader>("TLS 1.3 record", m_buffer);
-
-            records_received.emplace_back(plaintext_header.type, secure_vector<uint8_t>(plaintext_header.fragment_length));
-            }
+         if (records_received.empty())
+            return std::get<BytesNeeded>(result);
+         return records_received;
          }
+
+      records_received.emplace_back(std::move(std::get<Record>(result)));
       }
-   catch (const More_Bytes_Needed &needs)
+}
+
+Record_Layer::ReadResult<Record> Record_Layer::read_record()
+   {
+   if (m_buffer.size() < TLS_HEADER_SIZE)
       {
-      if (records_received.empty())
-         return needs.how_many();
+      return TLS_HEADER_SIZE - m_buffer.size();
       }
 
-   return records_received;
-}
+   const auto header_begin = m_buffer.cbegin();
+   TLSPlaintext_Header plaintext_header(header_begin);
+
+   if (m_buffer.size() < TLS_HEADER_SIZE + plaintext_header.fragment_length)
+      {
+      return TLS_HEADER_SIZE + plaintext_header.fragment_length - m_buffer.size();
+      }
+
+   const auto fragment_begin = header_begin + TLS_HEADER_SIZE;
+   const auto fragment_end   = fragment_begin + plaintext_header.fragment_length;
+
+   if (plaintext_header.type == Record_Type::CHANGE_CIPHER_SPEC)
+      {
+      // RFC 8446 5.
+      //    An implementation may receive an unencrypted record of type
+      //    change_cipher_spec consisting of the single byte value 0x01
+      //    at any time [...]. An implementation which receives any other
+      //    change_cipher_spec value or which receives a protected
+      //    change_cipher_spec record MUST abort the handshake [...].
+      const size_t expected_fragment_length = 1;
+      const uint8_t expected_fragment_byte = 0x01;
+      if (plaintext_header.fragment_length != expected_fragment_length ||
+          *fragment_begin != expected_fragment_byte)
+         throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
+                             "malformed change cipher spec record received");
+      }
+
+   Record record(plaintext_header.type,
+                 secure_vector<uint8_t>(fragment_begin, fragment_end));
+   m_buffer.erase(header_begin, fragment_end);
+
+   return record;
+   }
 
 }

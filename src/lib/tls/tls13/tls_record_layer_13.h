@@ -55,7 +55,10 @@ public:
     */
    ReadResult<std::vector<Record>> received_data(const std::vector<uint8_t>& data_from_peer);
 
-public:
+private:
+   ReadResult<Record> read_record();
+
+private:
    std::vector<uint8_t> m_buffer;
 };
 

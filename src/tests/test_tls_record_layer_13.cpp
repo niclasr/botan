@@ -52,7 +52,7 @@ std::vector<Test::Result> read_full_records()
             auto record = std::get<std::vector<TLS::Record>>(read);
             result.test_eq("received 1 record", record.size(), 1);
             result.confirm("received CCS", record.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.confirm("CCS bears no data", record.front().fragment.empty());
+            result.test_eq("CCS byte is 0x01", record.front().fragment, Botan::hex_decode("01"));
             }
          }),
 
@@ -67,8 +67,8 @@ std::vector<Test::Result> read_full_records()
             result.test_eq("received 2 records", record.size(), 2);
             result.confirm("received CCS 1", record.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
             result.confirm("received CCS 2", record.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.confirm("CCS bears no data", record.front().fragment.empty());
-            result.confirm("CCS bears no data", record.back().fragment.empty());
+            result.test_eq("CCS byte is 0x01", record.front().fragment, Botan::hex_decode("01"));
+            result.test_eq("CCS byte is 0x01", record.back().fragment, Botan::hex_decode("01"));
             }
          }),
 
@@ -99,7 +99,7 @@ std::vector<Test::Result> read_full_records()
                            Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
                                  client_hello_record.end()), rec.front().fragment);
             result.confirm("received CCS record", rec.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.confirm("CCS bears no data", rec.back().fragment.empty());
+            result.test_eq("CCS byte is 0x01", rec.back().fragment, Botan::hex_decode("01"));
             }
          })
       };
@@ -175,10 +175,10 @@ std::vector<Test::Result> basic_sanitization()
             });
          }),
 
-      CHECK("unexpected change cipher spec", [](auto& result)
+      CHECK("malformed change cipher spec", [](auto& result)
          {
          std::vector<uint8_t> invalid_ccs_record{'\x14', '\x03', '\x03', '\x00', '\x01', '\x02'};
-         result.test_throws("invalid CCS record", "unexpected change cipher spec record received", [&]
+         result.test_throws("invalid CCS record", "malformed change cipher spec record received", [&]
             {
             TLS::Record_Layer().received_data(invalid_ccs_record);
             });
@@ -215,7 +215,7 @@ std::vector<Test::Result> read_fragmented_records()
             auto rec1 = std::get<std::vector<TLS::Record>>(res1);
             result.test_eq("received 1 record", rec1.size(), 1);
             result.confirm("received CCS", rec1.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.confirm("CCS bears no data", rec1.front().fragment.empty());
+            result.test_eq("CCS byte is 0x01", rec1.front().fragment, Botan::hex_decode("01"));
             }
          }),
 
