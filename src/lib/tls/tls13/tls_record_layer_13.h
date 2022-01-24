@@ -53,7 +53,10 @@ public:
     * with processing TLS records or a list of plaintext TLS record contents
     * containing higher level protocol or application data.
     */
-   ReadResult<std::vector<Record>> received_data(std::vector<uint8_t> data_from_peer);
+   ReadResult<std::vector<Record>> received_data(const std::vector<uint8_t>& data_from_peer);
+
+public:
+   std::vector<uint8_t> m_buffer;
 };
 
 }

@@ -80,12 +80,99 @@ class Test_TLS_Record_Layer_13 final : public Test
          return result;
          }
 
+      Test::Result read_full_records()
+         {
+         Test::Result result("reading full records");
+
+         // change cipher spec
+         std::vector<uint8_t> ccs_record{'\x14', '\x03', '\x03', '\x00', '\x01', '\x01'};
+         auto res1 = TLS::Record_Layer().received_data(ccs_record);
+         if (result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(res1)))
+            {
+            auto rec1 = std::get<std::vector<TLS::Record>>(res1);
+            result.test_eq("received 1 record", rec1.size(), 1);
+            result.confirm("received CCS", rec1.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            result.confirm("CCS bears no data", rec1.front().fragment.empty());
+            }
+
+         // change cipher spec
+         std::vector<uint8_t> two_ccs_records{'\x14', '\x03', '\x03', '\x00', '\x01', '\x01',
+                                              '\x14', '\x03', '\x03', '\x00', '\x01', '\x01'};
+         auto res2 = TLS::Record_Layer().received_data(two_ccs_records);
+         if (result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(res2)))
+            {
+            auto rec2 = std::get<std::vector<TLS::Record>>(res2);
+            result.test_eq("received 2 records", rec2.size(), 2);
+            result.confirm("received CCS 1", rec2.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            result.confirm("received CCS 2", rec2.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            result.confirm("CCS bears no data", rec2.front().fragment.empty());
+            result.confirm("CCS bears no data", rec2.back().fragment.empty());
+            }
+
+         return result;
+         }
+
+      Test::Result read_fragmented_records()
+         {
+         Test::Result result("reading fragmented records");
+
+         TLS::Record_Layer rl;
+
+         // change cipher spec in many small pieces
+         std::vector<uint8_t> ccs_record{'\x14', '\x03', '\x03', '\x00', '\x01', '\x01'};
+
+         auto wait_for_more_bytes = [&result] (Botan::TLS::BytesNeeded bytes_needed, auto rlr) {
+            if (result.confirm("waiting for bytes", std::holds_alternative<TLS::BytesNeeded>(rlr)))
+               result.test_eq("right amount", std::get<TLS::BytesNeeded>(rlr), bytes_needed);
+         };
+
+         wait_for_more_bytes(4, rl.received_data({'\x14'}));
+         wait_for_more_bytes(3, rl.received_data({'\x03'}));
+         wait_for_more_bytes(2, rl.received_data({'\x03'}));
+         wait_for_more_bytes(1, rl.received_data({'\x00'}));
+         wait_for_more_bytes(1, rl.received_data({'\x01'}));
+
+         auto res1 = rl.received_data({'\x01'});
+         if (result.confirm("received something 1", std::holds_alternative<std::vector<TLS::Record>>(res1)))
+            {
+            auto rec1 = std::get<std::vector<TLS::Record>>(res1);
+            result.test_eq("received 1 record", rec1.size(), 1);
+            result.confirm("received CCS", rec1.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            result.confirm("CCS bears no data", rec1.front().fragment.empty());
+            }
+
+         // two change cipher specs in several pieces
+         wait_for_more_bytes(1, rl.received_data({'\x14', '\x03', '\x03', '\x00'}));
+
+         auto res2 = rl.received_data({'\x01', '\x01', /* second CCS starts here */ '\x14', '\x03'});
+         if (result.confirm("received something 2", std::holds_alternative<std::vector<TLS::Record>>(res2)))
+            {
+            auto rec2 = std::get<std::vector<TLS::Record>>(res2);
+            result.test_eq("received 1 record", rec2.size(), 1);
+            result.confirm("received CCS", rec2.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            }
+
+         wait_for_more_bytes(2, rl.received_data({'\x03'}));
+
+         auto res3 = rl.received_data({'\x00', '\x01', '\x01'});
+         if (result.confirm("received something 3", std::holds_alternative<std::vector<TLS::Record>>(res3)))
+            {
+            auto rec3 = std::get<std::vector<TLS::Record>>(res3);
+            result.test_eq("received 1 record", rec3.size(), 1);
+            result.confirm("received CCS", rec3.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+            }
+
+         return result;
+         }
+
    public:
       std::vector<Test::Result> run() override
          {
          return 
             {
-            basic_sanitization()
+            basic_sanitization(),
+            read_full_records(),
+            read_fragmented_records()
             };
          }
    };
