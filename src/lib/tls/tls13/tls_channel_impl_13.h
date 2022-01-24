@@ -9,6 +9,7 @@
 #define BOTAN_TLS_CHANNEL_IMPL_13_H_
 
 #include <botan/internal/tls_channel_impl.h>
+#include <botan/internal/tls_record_layer_13.h>
 
 namespace Botan {
 
@@ -171,6 +172,8 @@ class Channel_Impl_13 : public Channel_Impl
       std::map<uint16_t, std::shared_ptr<Connection_Cipher_State>> m_read_cipher_states;
 
       const bool m_is_server;
+
+      Record_Layer m_record_layer;
 
       /* I/O buffers */
       secure_vector<uint8_t> m_writebuf;

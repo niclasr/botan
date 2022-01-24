@@ -44,116 +44,59 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
    {
    try
       {
-      while(input_size)
+      const auto result = m_record_layer.parse_records(std::vector(input, input+input_size));
+      BOTAN_ASSERT(input_size == 0 || !std::holds_alternative<BytesNeeded>(result),
+                   "Got a full record or consumed all input");
+
+      if(std::holds_alternative<BytesNeeded>(result))
+         { return std::get<BytesNeeded>(result); }  // need more data to complete record
+
+      const auto records = std::get<std::vector<Record>>(result);
+      for(const auto& record : records)
          {
-         size_t consumed = 0;
-
-         auto get_epoch = [this](uint16_t epoch) { return read_cipher_state_epoch(epoch); };
-
-         const Record_Header record =
-            read_record(false,
-                        m_readbuf,
-                        input,
-                        input_size,
-                        consumed,
-                        m_record_buf,
-                        m_sequence_numbers.get(),
-                        get_epoch,
-                        false);
-
-         const size_t needed = record.needed();
-
-         BOTAN_ASSERT(consumed > 0, "Got to eat something");
-
-         BOTAN_ASSERT(consumed <= input_size,
-                      "Record reader consumed sane amount");
-
-         input += consumed;
-         input_size -= consumed;
-
-         BOTAN_ASSERT(input_size == 0 || needed == 0,
-                      "Got a full record or consumed all input");
-
-         if(input_size == 0 && needed != 0)
-            return needed; // need more data to complete record
-
-         if(m_record_buf.size() > MAX_PLAINTEXT_SIZE)
-            throw TLS_Exception(Alert::RECORD_OVERFLOW,
-                                "TLS plaintext record is larger than allowed maximum");
-
          const bool initial_record = !handshake_state();
 
-         if(record.type() != ALERT)
-            {
-            if(initial_record)
-               {
-               // For initial records just check for basic sanity
-               if(record.version().major_version() != 3 &&
-                  record.version().major_version() != 0xFE)
-                  {
-                  throw TLS_Exception(Alert::PROTOCOL_VERSION,
-                                      "Received unexpected record version in initial record");
-                  }
-               }
-            else if(auto state = handshake_state())
-               {
-               if(state->server_hello() != nullptr && record.version() != state->version())
-                  {
-                  throw TLS_Exception(Alert::PROTOCOL_VERSION,
-                                      "Received unexpected record version");
-                  }
-               }
-            }
-
-         if(record.type() == HANDSHAKE)
+         if(record.type == HANDSHAKE)
             {
             if(m_has_been_closed)
-               throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received handshake data after connection closure");
+               { throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received handshake data after connection closure"); }
 
-            //TODO: Handle the plain handshake message
             if(initial_record)
-               {
-               create_handshake_state(Protocol_Version::TLS_V13);  // ignore version in record header
-               }
+               { create_handshake_state(Protocol_Version::TLS_V13); }  // ignore version in record header
 
-            m_handshake_state->handshake_io().add_record(m_record_buf.data(),
-                                                         m_record_buf.size(),
-                                                         record.type(),
-                                                         record.sequence());
+            m_handshake_state->handshake_io().add_record(record.fragment.data(),
+                  record.fragment.size(),
+                  record.type,
+                  0 /* sequence number unused in TLS 1.3 */);
 
             auto msg = m_handshake_state->get_next_handshake_msg();
             process_handshake_msg(*m_handshake_state.get(), msg.first, msg.second);
-
             }
-         else if (record.type() == CHANGE_CIPHER_SPEC)
+         else if(record.type == CHANGE_CIPHER_SPEC)
             {
             if(m_has_been_closed)
-               throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received change cipher spec after connection closure");
+               { throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received change cipher spec after connection closure"); }
 
             // TODO: Send CCS in response / middlebox compatibility mode to be defined via the policy
             // TODO: as described in RFC 8446 Sec 5
             }
-         else if(record.type() == APPLICATION_DATA)
+         else if(record.type == APPLICATION_DATA)
             {
             if(m_has_been_closed)
-               throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received application data after connection closure");
+               { throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received application data after connection closure"); }
 
             if(initial_record)
-               throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Cannot handle plain application data");
+               { throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Cannot handle plain application data"); }
 
             //TODO: Process application data or encrypted handshake messages
             }
-         else if(record.type() == ALERT)
+         else if(record.type == ALERT)
             {
-            process_alert(m_record_buf);
+            process_alert(record.fragment);
             }
-         else if(record.type() != NO_RECORD)
-            throw Unexpected_Message("Unexpected record type " +
-                                     std::to_string(record.type()) +
-                                     " from counterparty");
+         else if(record.type != NO_RECORD)
+            throw Unexpected_Message("Unexpected record type " + std::to_string(record.type) + " from counterparty");
          }
-
-      return 0; // on a record boundary
       }
    catch(TLS_Exception& e)
       {
