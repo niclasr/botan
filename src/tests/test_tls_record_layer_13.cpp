@@ -58,13 +58,12 @@ std::vector<Test::Result> read_full_records()
       CHECK("change cipher spec", [&](auto& result)
          {
          auto read = TLS::Record_Layer().parse_records(ccs_record);
-         if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
-            {
-            auto record = std::get<std::vector<TLS::Record>>(read);
-            result.test_eq("received 1 record", record.size(), 1);
-            result.confirm("received CCS", record.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.test_eq("CCS byte is 0x01", record.front().fragment, Botan::hex_decode("01"));
-            }
+         result.require("received something", std::holds_alternative<std::vector<TLS::Record>>(read));
+
+         auto record = std::get<std::vector<TLS::Record>>(read);
+         result.test_eq("received 1 record", record.size(), 1);
+         result.confirm("received CCS", record.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+         result.test_eq("CCS byte is 0x01", record.front().fragment, Botan::hex_decode("01"));
          }),
 
       CHECK("two CCS messages", [&](auto& result)
@@ -72,46 +71,43 @@ std::vector<Test::Result> read_full_records()
          const auto two_ccs_records = Botan::concat(ccs_record, ccs_record);
 
          auto read = TLS::Record_Layer().parse_records(two_ccs_records);
-         if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
-            {
-            auto record = std::get<std::vector<TLS::Record>>(read);
-            result.test_eq("received 2 records", record.size(), 2);
-            result.confirm("received CCS 1", record.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.confirm("received CCS 2", record.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.test_eq("CCS byte is 0x01", record.front().fragment, Botan::hex_decode("01"));
-            result.test_eq("CCS byte is 0x01", record.back().fragment, Botan::hex_decode("01"));
-            }
+         result.require("received something", std::holds_alternative<std::vector<TLS::Record>>(read));
+
+         auto record = std::get<std::vector<TLS::Record>>(read);
+         result.test_eq("received 2 records", record.size(), 2);
+         result.confirm("received CCS 1", record.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+         result.confirm("received CCS 2", record.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+         result.test_eq("CCS byte is 0x01", record.front().fragment, Botan::hex_decode("01"));
+         result.test_eq("CCS byte is 0x01", record.back().fragment, Botan::hex_decode("01"));
          }),
 
       CHECK("read full handshake message", [&](auto& result)
          {
          auto read = TLS::Record_Layer().parse_records(client_hello_record);
-         if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
-            {
-            auto rec = std::get<std::vector<TLS::Record>>(read);
-            result.test_eq("received 1 record", rec.size(), 1);
-            result.confirm("received handshake record", rec.front().type == TLS::Record_Type::HANDSHAKE);
-            result.test_eq("contains the full handshake message",
-                           Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
-                                 client_hello_record.end()), rec.front().fragment);
-            }
+         result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read));
+
+         auto rec = std::get<std::vector<TLS::Record>>(read);
+         result.test_eq("received 1 record", rec.size(), 1);
+         result.confirm("received handshake record", rec.front().type == TLS::Record_Type::HANDSHAKE);
+         result.test_eq("contains the full handshake message",
+                        Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
+                              client_hello_record.end()), rec.front().fragment);
          }),
 
       CHECK("read full handshake message followed by CCS", [&](auto& result)
          {
          const auto payload = Botan::concat(client_hello_record, ccs_record);
          auto read = TLS::Record_Layer().parse_records(payload);
-         if(result.confirm("received something", std::holds_alternative<std::vector<TLS::Record>>(read)))
-            {
-            auto rec = std::get<std::vector<TLS::Record>>(read);
-            result.test_eq("received 2 records", rec.size(), 2);
-            result.confirm("received handshake record", rec.front().type == TLS::Record_Type::HANDSHAKE);
-            result.test_eq("contains the full handshake message",
-                           Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
-                                 client_hello_record.end()), rec.front().fragment);
-            result.confirm("received CCS record", rec.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.test_eq("CCS byte is 0x01", rec.back().fragment, Botan::hex_decode("01"));
-            }
+         result.require("received something", std::holds_alternative<std::vector<TLS::Record>>(read));
+
+         auto rec = std::get<std::vector<TLS::Record>>(read);
+         result.test_eq("received 2 records", rec.size(), 2);
+         result.confirm("received handshake record", rec.front().type == TLS::Record_Type::HANDSHAKE);
+         result.test_eq("contains the full handshake message",
+                        Botan::secure_vector<uint8_t>(client_hello_record.begin()+TLS::TLS_HEADER_SIZE,
+                              client_hello_record.end()), rec.front().fragment);
+         result.confirm("received CCS record", rec.back().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+         result.test_eq("CCS byte is 0x01", rec.back().fragment, Botan::hex_decode("01"));
          })
       };
    }
@@ -124,21 +120,19 @@ std::vector<Test::Result> basic_sanitization()
          {
          std::vector<uint8_t> partial_header{'\x23', '\x03', '\x03'};
          auto read = TLS::Record_Layer().parse_records(partial_header);
-         if(result.confirm("returned 'bytes needed'", std::holds_alternative<TLS::BytesNeeded>(read)))
-            {
-            result.test_eq("asks for some more bytes", std::get<TLS::BytesNeeded>(read),
-                           Botan::TLS::TLS_HEADER_SIZE - partial_header.size());
-            }
+         result.require("returned 'bytes needed'", std::holds_alternative<TLS::BytesNeeded>(read));
+
+         result.test_eq("asks for some more bytes", std::get<TLS::BytesNeeded>(read),
+                        Botan::TLS::TLS_HEADER_SIZE - partial_header.size());
          }),
 
       CHECK("complete header asks for enough data to finish processing the record", [](auto& result)
          {
          std::vector<uint8_t> full_header{'\x17', '\x03', '\x03', '\x00', '\x42'};
          auto read = TLS::Record_Layer().parse_records(full_header);
-         if(result.confirm("returned 'bytes needed'", std::holds_alternative<TLS::BytesNeeded>(read)))
-            {
-            result.test_eq("asks for many more bytes", std::get<TLS::BytesNeeded>(read), 0x42);
-            }
+         result.require("returned 'bytes needed'", std::holds_alternative<TLS::BytesNeeded>(read));
+
+         result.test_eq("asks for many more bytes", std::get<TLS::BytesNeeded>(read), 0x42);
          }),
 
       CHECK("received an empty record (that is not application data)", [](auto& result)
@@ -221,37 +215,33 @@ std::vector<Test::Result> read_fragmented_records()
          wait_for_more_bytes(1, rl.parse_records({'\x01'}), result);
 
          auto res1 = rl.parse_records({'\x01'});
-         if(result.confirm("received something 1", std::holds_alternative<std::vector<TLS::Record>>(res1)))
-            {
-            auto rec1 = std::get<std::vector<TLS::Record>>(res1);
-            result.test_eq("received 1 record", rec1.size(), 1);
-            result.confirm("received CCS", rec1.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            result.test_eq("CCS byte is 0x01", rec1.front().fragment, Botan::hex_decode("01"));
-            }
-         }),
+         result.require("received something 1", std::holds_alternative<std::vector<TLS::Record>>(res1));
 
+         auto rec1 = std::get<std::vector<TLS::Record>>(res1);
+         result.test_eq("received 1 record", rec1.size(), 1);
+         result.confirm("received CCS", rec1.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
+         result.test_eq("CCS byte is 0x01", rec1.front().fragment, Botan::hex_decode("01"));
+         }),
 
       CHECK("two change cipher specs in several pieces", [&](auto& result)
          {
          wait_for_more_bytes(1, rl.parse_records({'\x14', '\x03', '\x03', '\x00'}), result);
 
          auto res2 = rl.parse_records({'\x01', '\x01', /* second CCS starts here */ '\x14', '\x03'});
-         if(result.confirm("received something 2", std::holds_alternative<std::vector<TLS::Record>>(res2)))
-            {
-            auto rec2 = std::get<std::vector<TLS::Record>>(res2);
-            result.test_eq("received 1 record", rec2.size(), 1);
-            result.confirm("received CCS", rec2.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            }
+         result.require("received something 2", std::holds_alternative<std::vector<TLS::Record>>(res2));
+
+         auto rec2 = std::get<std::vector<TLS::Record>>(res2);
+         result.test_eq("received 1 record", rec2.size(), 1);
+         result.confirm("received CCS", rec2.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
 
          wait_for_more_bytes(2, rl.parse_records({'\x03'}), result);
 
          auto res3 = rl.parse_records({'\x00', '\x01', '\x01'});
-         if(result.confirm("received something 3", std::holds_alternative<std::vector<TLS::Record>>(res3)))
-            {
-            auto rec3 = std::get<std::vector<TLS::Record>>(res3);
-            result.test_eq("received 1 record", rec3.size(), 1);
-            result.confirm("received CCS", rec3.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
-            }
+         result.require("received something 3", std::holds_alternative<std::vector<TLS::Record>>(res3));
+
+         auto rec3 = std::get<std::vector<TLS::Record>>(res3);
+         result.test_eq("received 1 record", rec3.size(), 1);
+         result.confirm("received CCS", rec3.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
          })
       };
    }
@@ -275,20 +265,18 @@ std::vector<Test::Result> write_records()
                "01 04 02 05 02 06 02 02 02 00 2d 00 02 01 01 00 1c 00 02 40 01");
             auto record = TLS::Record_Layer().prepare_records(Botan::TLS::HANDSHAKE, client_hello_msg.data(), client_hello_msg.size());
 
-            if (result.confirm("record header was added", record.size() == client_hello_msg.size() + Botan::TLS::TLS_HEADER_SIZE))
-               {
-               const auto header = std::vector<uint8_t>(record.cbegin(), record.cbegin() + Botan::TLS::TLS_HEADER_SIZE);
-               result.test_eq("record header is well-formed", header, Botan::hex_decode("16030300c4"));
-               }
+            result.require("record header was added", record.size() == client_hello_msg.size() + Botan::TLS::TLS_HEADER_SIZE);
+
+            const auto header = std::vector<uint8_t>(record.cbegin(), record.cbegin() + Botan::TLS::TLS_HEADER_SIZE);
+            result.test_eq("record header is well-formed", header, Botan::hex_decode("16030300c4"));
          }),
       CHECK("prepare a dummy CCS", [&](auto& result)
          {
             auto record = TLS::Record_Layer().prepare_dummy_ccs_record();
 
-            if (result.confirm("record was created", record.size() == Botan::TLS::TLS_HEADER_SIZE + 1))
-               {
-               result.test_eq("CCS record is well-formed", record, Botan::hex_decode("140303000101"));
-               }
+            result.require("record was created", record.size() == Botan::TLS::TLS_HEADER_SIZE + 1);
+
+            result.test_eq("CCS record is well-formed", record, Botan::hex_decode("140303000101"));
          }),
       CHECK("cannot prepare non-dummy CCS", [&](auto& result)
          {
