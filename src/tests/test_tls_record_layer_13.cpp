@@ -23,7 +23,18 @@ template<typename FunT>
 Test::Result CHECK(const char* name, FunT check_fun)
    {
    Botan_Tests::Test::Result r(name);
-   check_fun(r);
+   try
+      {
+      check_fun(r);
+      }
+   catch (const Botan_Tests::Test_Aborted&)
+      {
+      // pass, failure was already noted in the responsible `require`
+      }
+   catch (const std::exception &ex)
+      {
+      r.test_failure(std::string("failed with exception: ") + ex.what());
+      }
    return r;
    }
 

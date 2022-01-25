@@ -42,11 +42,17 @@ namespace Botan_Tests {
    using Botan::BigInt;
 #endif
 
-class Test_Error final : public Botan::Exception
+class Test_Error : public Botan::Exception
    {
    public:
       explicit Test_Error(const std::string& what) : Exception("Test error", what) {}
       Botan::ErrorType error_type() const noexcept override { return Botan::ErrorType::Unknown; }
+   };
+
+class Test_Aborted final : public Test_Error
+   {
+   public:
+      explicit Test_Aborted(const std::string& what) : Test_Error(what) {}
    };
 
 class Test_Options
@@ -238,6 +244,17 @@ class Test
             bool confirm(const std::string& what, bool expr, bool expected = true)
                {
                return test_eq(what, expr, expected);
+               }
+
+            /**
+             * Require a condition, throw Test_Aborted otherwise
+             */
+            void require(const std::string& what, bool expr, bool expected = true)
+               {
+               if(!confirm(what, expr, expected))
+                  {
+                  throw Test_Aborted("test aborted, because required condition was not met");
+                  }
                }
 
             template<typename T>
