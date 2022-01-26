@@ -438,6 +438,28 @@ class Test
             bool test_throws(const std::string& what, const std::string& expected,
                              std::function<void ()> fn);
 
+            template <typename ExceptionT>
+            bool test_throws(const std::string& what, std::function<void ()> fn)
+               {
+               try
+                  {
+                  fn();
+                  return test_failure(what + " failed to throw expected exception");
+                  }
+               catch (const ExceptionT &e)
+                  {
+                  return test_success(what + " threw exception " + e.what());
+                  }
+               catch(const std::exception& e)
+                  {
+                  return test_failure(what + " threw unexpected exception " + e.what());
+                  }
+               catch(...)
+                  {
+                  return test_failure(what + " threw unexpected exception");
+                  }
+               }
+
             void set_ns_consumed(uint64_t ns)
                {
                m_ns_taken = ns;
