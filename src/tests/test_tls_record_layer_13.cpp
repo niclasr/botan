@@ -11,6 +11,7 @@
 
 #include <botan/tls_magic.h>
 #include <botan/internal/stl_util.h>
+#include <botan/internal/tls_reader.h>
 
 #include <botan/internal/tls_record_layer_13.h>
 
@@ -382,6 +383,33 @@ std::vector<Test::Result> write_encrypted_records() {
          "0b 29 80 44 a7 1e 21 9c 56 cc 77 b0 51 7f e9 b9 3c 7a 4b fc 44 d8 7f"
          "38 f8 03 38 ac 98 fc 46 de b3 84 bd 1c ae ac ab 68 67 d7 26 c4 05 46");
      result.test_eq("produced the expected ciphertext", ct, expected_ct);
+     }),
+
+     CHECK("write a lot of data producing two protected records", [&](Test::Result& result) {
+         std::vector<uint8_t> big_data(TLS::MAX_PLAINTEXT_SIZE + TLS::MAX_PLAINTEXT_SIZE / 2);
+         auto ct = TLS::Record_Layer().prepare_protected_records(TLS::Record_Type::APPLICATION_DATA,
+                                                                 big_data.data(), big_data.size());
+         result.require("encryption added some MAC and record headers", ct.size() > big_data.size() + Botan::TLS::TLS_HEADER_SIZE * 2);
+
+         auto read_record_header = [&](auto &reader)
+            {
+            result.test_is_eq("APPLICATION_DATA", reader.get_byte(), static_cast<uint8_t>(TLS::Record_Type::APPLICATION_DATA));
+            result.test_is_eq("TLS legacy version", reader.get_uint16_t(), uint16_t(0x0303));
+
+            const auto fragment_length = reader.get_uint16_t();
+            result.test_lte("TLS limts", fragment_length, TLS::MAX_CIPHERTEXT_SIZE_TLS13);
+            result.require("enough data", fragment_length + Botan::TLS::TLS_HEADER_SIZE < ct.size());
+            return fragment_length;
+            };
+
+         TLS::TLS_Data_Reader reader("test reader", ct);
+         const auto fragment_length1 = read_record_header(reader);
+         reader.discard_next(fragment_length1);
+
+         const auto fragment_length2 = read_record_header(reader);
+         reader.discard_next(fragment_length2);
+
+         result.confirm("consumed all bytes", !reader.has_remaining());
      })
    };
 }
