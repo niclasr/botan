@@ -123,7 +123,7 @@ void Client_Impl_13::process_handshake_msg(
 
       if(!sh->extensions().has<Key_Share>())
          {
-           // TODO
+         // TODO
          throw Unexpected_Message("keyshare ext not found!");
          }
 
@@ -131,17 +131,44 @@ void Client_Impl_13::process_handshake_msg(
       auto my_keyshare = state.client_hello()->extensions().get<Key_Share>();
       const auto shared_secret = my_keyshare->exchange(sh->extensions().get<Key_Share>(), policy(), callbacks(), rng());
 
-      state.set_expected_next(ENCRYPTED_EXTENSIONS);  // TODO expect CCS (middlebox compat)
+      callbacks().tls_examine_extensions(state.server_hello()->extensions(), SERVER);
 
+      state.set_expected_next(ENCRYPTED_EXTENSIONS);  // TODO expect CCS (middlebox compat)
       }
    else if(type == ENCRYPTED_EXTENSIONS)
       {
-      throw Not_Implemented("client 13 process_handshake_msg is nyi");
+      // TODO: check all extensions are allowed and expected
+      state.encrypted_extensions(new Encrypted_Extensions(contents));
+
+      // Note: As per RFC 6066 3. we can check for an empty SNI extensions to
+      // determine if the server used the SNI we sent here.
+
+      callbacks().tls_examine_extensions(state.encrypted_extensions()->extensions(), SERVER);
+
+      // TODO: this is not true if using PSK
+
+      state.set_expected_next(CERTIFICATE_REQUEST);
+      state.set_expected_next(CERTIFICATE);
+      }
+   else if(type == CERTIFICATE_REQUEST)
+      {
+      state.set_expected_next(CERTIFICATE);
+      }
+   else if(type == CERTIFICATE)
+      {
+      state.set_expected_next(CERTIFICATE_VERIFY);
+      }
+   else if(type == CERTIFICATE_VERIFY)
+      {
+      state.set_expected_next(FINISHED);
+      }
+   else if(type == FINISHED)
+      {
       }
    else
       {
-      throw Unexpected_Message("unknown handshake message received");
-      }
+      throw Unexpected_Message("unknown handshake message received: " +
+          std::string(handshake_type_to_string(type))); }
    }
 
 std::unique_ptr<Handshake_State> Client_Impl_13::new_handshake_state(std::unique_ptr<Handshake_IO> io)

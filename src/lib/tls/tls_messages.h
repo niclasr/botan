@@ -290,6 +290,22 @@ class BOTAN_UNSTABLE_API Server_Hello final : public Handshake_Message
       std::unique_ptr<Server_Hello_Impl> m_impl;
    };
 
+class BOTAN_UNSTABLE_API Encrypted_Extensions final : public Handshake_Message
+   {
+   public:
+      explicit Encrypted_Extensions(const std::vector<uint8_t>& buf);
+
+      ~Encrypted_Extensions() override = default;
+      Handshake_Type type() const override { return Handshake_Type::ENCRYPTED_EXTENSIONS; }
+
+      const Extensions& extensions() const { return m_extensions; }
+
+      std::vector<uint8_t> serialize() const override { return {}; }
+
+   private:
+      Extensions m_extensions;
+   };
+
 /**
 * Client Key Exchange Message
 */

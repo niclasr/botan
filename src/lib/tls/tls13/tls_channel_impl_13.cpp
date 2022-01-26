@@ -61,16 +61,23 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
             if(m_has_been_closed)
                { throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "Received handshake data after connection closure"); }
 
-            if(initial_record)
-               { create_handshake_state(Protocol_Version::TLS_V13); }  // ignore version in record header
+            if (initial_record)
+            {
+            // server side will not have a handshake state yet
+            create_handshake_state(Protocol_Version::TLS_V13);  // ignore version in record header
+            }
 
             m_handshake_state->handshake_io().add_record(record.fragment.data(),
                   record.fragment.size(),
                   record.type,
                   0 /* sequence number unused in TLS 1.3 */);
 
-            auto msg = m_handshake_state->get_next_handshake_msg();
-            process_handshake_msg(*m_handshake_state.get(), msg.first, msg.second);
+            while (true)
+               {
+               auto [type, content] = m_handshake_state->get_next_handshake_msg();
+               if (type == HANDSHAKE_NONE) break;
+               process_handshake_msg(*m_handshake_state.get(), type, content);
+               }
             }
          else if(record.type == CHANGE_CIPHER_SPEC)
             {
