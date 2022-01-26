@@ -69,7 +69,7 @@ private:
    void encrypt(secure_vector<uint8_t>& data);
 
 private:
-   std::vector<uint8_t> m_buffer;
+   std::vector<uint8_t> m_read_buffer;
 };
 
 }

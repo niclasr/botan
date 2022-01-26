@@ -99,7 +99,7 @@ Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer)
 {
    std::vector<Record> records_received;
 
-   m_buffer.insert(m_buffer.end(), data_from_peer.cbegin(), data_from_peer.cend());
+   m_read_buffer.insert(m_read_buffer.end(), data_from_peer.cbegin(), data_from_peer.cend());
    while (true)
       {
       auto result = read_record();
@@ -201,17 +201,17 @@ std::vector<uint8_t> Record_Layer::prepare_dummy_ccs_record()
 
 Record_Layer::ReadResult<Record> Record_Layer::read_record()
    {
-   if (m_buffer.size() < TLS_HEADER_SIZE)
+   if (m_read_buffer.size() < TLS_HEADER_SIZE)
       {
-      return TLS_HEADER_SIZE - m_buffer.size();
+      return TLS_HEADER_SIZE - m_read_buffer.size();
       }
 
-   const auto header_begin = m_buffer.cbegin();
+   const auto header_begin = m_read_buffer.cbegin();
    TLSPlaintext_Header plaintext_header(header_begin);
 
-   if (m_buffer.size() < TLS_HEADER_SIZE + plaintext_header.fragment_length)
+   if (m_read_buffer.size() < TLS_HEADER_SIZE + plaintext_header.fragment_length)
       {
-      return TLS_HEADER_SIZE + plaintext_header.fragment_length - m_buffer.size();
+      return TLS_HEADER_SIZE + plaintext_header.fragment_length - m_read_buffer.size();
       }
 
    const auto fragment_begin = header_begin + TLS_HEADER_SIZE;
@@ -226,7 +226,7 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
 
    Record record(plaintext_header.type,
                  secure_vector<uint8_t>(fragment_begin, fragment_end));
-   m_buffer.erase(header_begin, fragment_end);
+   m_read_buffer.erase(header_begin, fragment_end);
 
    if (record.type == Record_Type::APPLICATION_DATA)
       decrypt(record);
