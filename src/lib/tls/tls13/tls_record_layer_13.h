@@ -32,6 +32,8 @@ struct Record {
 
 using BytesNeeded = size_t;
 
+class Cipher_State;
+
 /**
  * Implementation of the TLS 1.3 record protocol layer
  *
@@ -41,7 +43,8 @@ using BytesNeeded = size_t;
 class Record_Layer
 {
 public:
-   Record_Layer() = default;
+   Record_Layer();
+   ~Record_Layer();
 
    template <typename ResT>
    using ReadResult = std::variant<BytesNeeded, ResT>;
@@ -56,20 +59,31 @@ public:
    ReadResult<std::vector<Record>> parse_records(const std::vector<uint8_t>& data_from_peer);
 
    std::vector<uint8_t> prepare_records(const Record_Type type,
-                                        const uint8_t data[], size_t size);
+                                        const uint8_t data[], size_t size)
+      {
+      return prepare_records(type, data, size, false);
+      }
 
    std::vector<uint8_t> prepare_protected_records(const Record_Type type,
-                                                  const uint8_t data[], size_t size);
+                                                  const uint8_t data[], size_t size)
+      {
+      return prepare_records(type, data, size, true);
+      }
 
    std::vector<uint8_t> prepare_dummy_ccs_record();
 
 private:
    ReadResult<Record> read_record();
-   void decrypt(Record& record);
-   void encrypt(secure_vector<uint8_t>& data);
+
+   std::vector<uint8_t> prepare_records(const Record_Type type,
+                                        const uint8_t data[], size_t size,
+                                        const bool protect);
+
 
 private:
    std::vector<uint8_t> m_read_buffer;
+
+   std::unique_ptr<Cipher_State> m_cipher;
 };
 
 }

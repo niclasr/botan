@@ -18,6 +18,56 @@
 
 namespace Botan::TLS {
 
+class Cipher_State {
+public:
+   void encrypt(const std::vector<uint8_t>& header, secure_vector<uint8_t> &fragment)
+   {
+      const auto key = Botan::hex_decode("db fa a6 93 d1 76 2c 5b 66 6a f5 d9 50 25 8d 01");
+      const auto iv  = Botan::hex_decode("5b d3 c7 1b 83 6e 0b 76 bb 73 26 5f");
+
+      m_encrypt->set_key(key);
+      m_encrypt->set_associated_data_vec(header);
+      m_encrypt->start(iv);
+      m_encrypt->finish(fragment);
+   }
+
+   void decrypt(const std::vector<uint8_t>& header, secure_vector<uint8_t> &encrypted_fragment)
+   {
+      const auto key = Botan::hex_decode("3f ce 51 60 09 c2 17 27 d0 f2 e4 e8 6e e4 03 bc");
+      const auto iv  = Botan::hex_decode("5d 31 3e b2 67 12 76 ee 13 00 0b 30");
+
+      m_decrypt->set_key(key);
+      m_decrypt->set_associated_data_vec(header);
+      m_decrypt->start(iv);
+
+      try
+         {
+         m_decrypt->finish(encrypted_fragment);
+         }
+      catch (const Decoding_Error &ex)
+         {
+         // Decoding_Error is thrown by AEADs if the provided cipher text was
+         // too short to hold an authentication tag. We are treating this as
+         // an Invalid_Authentication_Tag so that the TLS channel will react
+         // with an BAD_RECORD_MAC alert as specified in RFC 8446 5.2.
+         throw Invalid_Authentication_Tag(ex.what());
+         }
+   }
+
+   Cipher_State()
+      : m_encrypt(AEAD_Mode::create("AES-128/GCM", ENCRYPTION))
+      , m_decrypt(AEAD_Mode::create("AES-128/GCM", DECRYPTION)) {}
+
+   size_t encrypt_output_length(const size_t input_length) const
+   {
+      return m_encrypt->output_length(input_length);
+   }
+
+private:
+   std::unique_ptr<AEAD_Mode> m_encrypt;
+   std::unique_ptr<AEAD_Mode> m_decrypt;
+};
+
 namespace {
 
 template <typename IteratorT>
@@ -87,12 +137,32 @@ struct TLSPlaintext_Header
          throw TLS_Exception(Alert::RECORD_OVERFLOW, "overflowing record received");
       }
 
+   TLSPlaintext_Header(const Record_Type type, const size_t fragment_length)
+      : type(type)
+      , legacy_version(0x0303)
+      , fragment_length(static_cast<uint16_t>(fragment_length)) {}
+
+   std::vector<uint8_t> serialize() const {
+      return
+         {
+         static_cast<uint8_t>(type),
+         legacy_version.major_version(), legacy_version.minor_version(),
+         get_byte<0>(fragment_length), get_byte<1>(fragment_length),
+         };
+   }
+
    Record_Type      type;
    Protocol_Version legacy_version;
    uint16_t         fragment_length;
 };
 
 }  // namespace
+
+
+Record_Layer::Record_Layer()
+   : m_cipher(std::make_unique<Cipher_State>()) {}
+
+Record_Layer::~Record_Layer() {};
 
 Record_Layer::ReadResult<std::vector<Record>>
 Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer)
@@ -117,10 +187,12 @@ Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer)
 
 std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
                                                    const uint8_t data[],
-                                                   size_t size)
+                                                   size_t size,
+                                                   const bool protect)
    {
-   // must use prepare_protected_records for application data
-   BOTAN_ASSERT_NOMSG(type != Record_Type::APPLICATION_DATA);
+   std::vector<uint8_t> output;
+   // TODO: we could pre-compute the data that will be needed for the output buffer
+   //       and .reserve() it, to avoid unnecessary re-allocations of the vector
 
    if (type == Record_Type::CHANGE_CIPHER_SPEC &&
        !verify_change_cipher_spec(data, size))
@@ -128,65 +200,41 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
       throw Invalid_Argument("TLS 1.3 deprecated CHANGE_CIPHER_SPEC");
       }
 
-   std::vector<uint8_t> output;
-   output.reserve(size + ((size / MAX_PLAINTEXT_SIZE) + 1) * TLS_HEADER_SIZE);
-
-   size_t offset = 0;
-   while(size > 0)
-      {
-      const size_t sending = std::min<size_t>(size, MAX_PLAINTEXT_SIZE);
-
-      output.emplace_back(static_cast<uint8_t>(type));
-      output.emplace_back(0x03);
-      output.emplace_back(0x03);
-
-      const auto fragment_length = static_cast<uint16_t>(sending);
-      output.emplace_back(get_byte<0>(fragment_length));
-      output.emplace_back(get_byte<1>(fragment_length));
-
-      output.insert(output.end(), data + offset, data + offset + sending);
-
-      offset += sending;
-      size -= sending;
-      }
-
-   return output;
-   }
-
-std::vector<uint8_t> Record_Layer::prepare_protected_records(const Record_Type type,
-                                                             const uint8_t data[],
-                                                             size_t size)
-   {
-   std::vector<uint8_t> output;
-
    size_t pt_offset = 0;
    while(size > 0)
       {
-      secure_vector<uint8_t> fragment;
       const size_t pt_size = std::min<size_t>(size, MAX_PLAINTEXT_SIZE);
+      const size_t ct_size = (!protect) ? pt_size : m_cipher->encrypt_output_length(pt_size + 1 /* for content type byte */);
+      const auto   pt_type = (!protect) ? type : Record_Type::APPLICATION_DATA;
 
-      fragment.reserve(pt_size + MAX_AEAD_EXPANSION_SIZE_TLS13
-                             + 1 /* for content type byte */);
+      const auto record_header = TLSPlaintext_Header(pt_type, ct_size).serialize();
 
-      // assemble TLSInnerPlaintext structure
-      fragment.insert(fragment.end(), data + pt_offset, data + pt_offset + pt_size);
-      fragment.push_back(static_cast<uint8_t>(type));
-      // TODO: zero padding could go here, see RFC 8446 5.4
+      output.reserve(output.size() + record_header.size() + ct_size);
+      output.insert(output.end(), record_header.cbegin(), record_header.cend());
 
-      encrypt(fragment);
+      if (protect)
+         {
+         secure_vector<uint8_t> fragment;
+         fragment.reserve(ct_size);
 
-      output.emplace_back(static_cast<uint8_t>(Record_Type::APPLICATION_DATA));
-      output.emplace_back(0x03);
-      output.emplace_back(0x03);
+         // assemble TLSInnerPlaintext structure
+         fragment.insert(fragment.end(), data + pt_offset, data + pt_offset + pt_size);
+         fragment.push_back(static_cast<uint8_t>(type));
+         // TODO: zero padding could go here, see RFC 8446 5.4
 
-      const auto fragment_length = static_cast<uint16_t>(fragment.size());
-      output.emplace_back(get_byte<0>(fragment_length));
-      output.emplace_back(get_byte<1>(fragment_length));
+         m_cipher->encrypt(record_header, fragment);
+         BOTAN_ASSERT_NOMSG(fragment.size() == ct_size);
 
-      output.insert(output.end(), fragment.cbegin(), fragment.cend());
+         // TODO: could pre pre-computed before entering the sharding loop
+         output.insert(output.end(), fragment.cbegin(), fragment.cend());
+         }
+      else
+         {
+         output.insert(output.end(), data + pt_offset, data + pt_offset + pt_size);
+         }
 
-      size -= pt_size;
       pt_offset += pt_size;
+      size -= pt_size;
       }
 
    return output;
@@ -207,6 +255,7 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
       }
 
    const auto header_begin = m_read_buffer.cbegin();
+   const auto header_end   = header_begin + TLS_HEADER_SIZE;
    TLSPlaintext_Header plaintext_header(header_begin);
 
    if (m_read_buffer.size() < TLS_HEADER_SIZE + plaintext_header.fragment_length)
@@ -214,7 +263,7 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
       return TLS_HEADER_SIZE + plaintext_header.fragment_length - m_read_buffer.size();
       }
 
-   const auto fragment_begin = header_begin + TLS_HEADER_SIZE;
+   const auto fragment_begin = header_end;
    const auto fragment_end   = fragment_begin + plaintext_header.fragment_length;
 
    if (plaintext_header.type == Record_Type::CHANGE_CIPHER_SPEC &&
@@ -229,67 +278,14 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
    m_read_buffer.erase(header_begin, fragment_end);
 
    if (record.type == Record_Type::APPLICATION_DATA)
-      decrypt(record);
+      {
+      m_cipher->decrypt({header_begin, header_end}, record.fragment);
+
+      // hydrate the actual content type from TLSInnerPlaintext
+      record.type = read_record_type(record.fragment.back());
+      record.fragment.pop_back();
+      }
 
    return record;
-   }
-
-void Record_Layer::decrypt(Record& record)
-   {
-   const auto key = Botan::hex_decode("3f ce 51 60 09 c2 17 27 d0 f2 e4 e8 6e e4 03 bc");
-   const auto iv  = Botan::hex_decode("5d 31 3e b2 67 12 76 ee 13 00 0b 30");
-
-   std::vector<uint8_t> ad;
-
-   ad.push_back(record.type);
-   ad.push_back(0x03);
-   ad.push_back(0x03);
-   const auto length = static_cast<uint16_t>(record.fragment.size());
-   ad.push_back(get_byte<0>(length));
-   ad.push_back(get_byte<1>(length));
-
-   auto dec = Botan::AEAD_Mode::create("AES-128/GCM", Botan::DECRYPTION);
-   dec->set_key(key);
-   dec->set_associated_data_vec(ad);
-   dec->start(iv);
-
-   try
-      {
-      dec->finish(record.fragment);
-      }
-   catch (const Decoding_Error &ex)
-      {
-      // Decoding_Error is thrown by AEADs if the provided cipher text was
-      // too short to hold an authentication tag. We are treating this as
-      // an Invalid_Authentication_Tag so that the TLS channel will react
-      // with an BAD_RECORD_MAC alert as specified in RFC 8446 5.2.
-      throw Invalid_Authentication_Tag(ex.what());
-      }
-
-   record.type = read_record_type(record.fragment.back());
-   record.fragment.pop_back();
-   }
-
-void Record_Layer::encrypt(secure_vector<uint8_t>& fragment)
-   {
-   const auto key = Botan::hex_decode("db fa a6 93 d1 76 2c 5b 66 6a f5 d9 50 25 8d 01");
-   const auto iv  = Botan::hex_decode("5b d3 c7 1b 83 6e 0b 76 bb 73 26 5f");
-
-   auto enc = Botan::AEAD_Mode::create("AES-128/GCM", Botan::ENCRYPTION);
-
-   std::vector<uint8_t> ad;
-
-   ad.push_back(Record_Type::APPLICATION_DATA);
-   ad.push_back(0x03);
-   ad.push_back(0x03);
-   const auto length = static_cast<uint16_t>(enc->output_length(fragment.size()));
-   ad.push_back(get_byte<0>(length));
-   ad.push_back(get_byte<1>(length));
-
-   enc->set_key(key);
-   enc->set_associated_data_vec(ad);
-   enc->start(iv);
-
-   enc->finish(fragment);
    }
 }
