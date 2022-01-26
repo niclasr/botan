@@ -105,6 +105,9 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
       }
    catch(Invalid_Authentication_Tag&)
       {
+      // RFC 8446 5.2
+      //    If the decryption fails, the receiver MUST terminate the connection
+      //    with a "bad_record_mac" alert.
       send_fatal_alert(Alert::BAD_RECORD_MAC);
       throw;
       }
