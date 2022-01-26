@@ -34,7 +34,7 @@ using BytesNeeded = size_t;
 
 /**
  * Implementation of the TLS 1.3 record protocol layer
- * 
+ *
  * This component transforms bytes received from the peer into bytes
  * containing plaintext TLS messages and vice versa.
  */
@@ -48,7 +48,7 @@ public:
 
    /**
     * Reads data that was received by the peer.
-    * 
+    *
     * Return value contains either the number of bytes (`size_t`) needed to proceed
     * with processing TLS records or a list of plaintext TLS record contents
     * containing higher level protocol or application data.
@@ -58,11 +58,15 @@ public:
    std::vector<uint8_t> prepare_records(const Record_Type type,
                                         const uint8_t data[], size_t size);
 
+   std::vector<uint8_t> prepare_protected_records(const Record_Type type,
+                                                  const uint8_t data[], size_t size);
+
    std::vector<uint8_t> prepare_dummy_ccs_record();
 
 private:
    ReadResult<Record> read_record();
    void decrypt(Record& record);
+   void encrypt(secure_vector<uint8_t>& data);
 
 private:
    std::vector<uint8_t> m_buffer;

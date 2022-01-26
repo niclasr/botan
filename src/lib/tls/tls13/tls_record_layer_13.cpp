@@ -119,7 +119,8 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
                                                    const uint8_t data[],
                                                    size_t size)
    {
-   BOTAN_ASSERT_NOMSG(type != Record_Type::APPLICATION_DATA); // not implemented yet
+   // must use prepare_protected_records for application data
+   BOTAN_ASSERT_NOMSG(type != Record_Type::APPLICATION_DATA);
 
    if (type == Record_Type::CHANGE_CIPHER_SPEC &&
        !verify_change_cipher_spec(data, size))
@@ -139,14 +140,53 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
       output.emplace_back(0x03);
       output.emplace_back(0x03);
 
-      const auto u16_size = static_cast<uint16_t>(sending);
-      output.emplace_back(get_byte<0>(u16_size));
-      output.emplace_back(get_byte<1>(u16_size));
+      const auto fragment_length = static_cast<uint16_t>(sending);
+      output.emplace_back(get_byte<0>(fragment_length));
+      output.emplace_back(get_byte<1>(fragment_length));
 
       output.insert(output.end(), data + offset, data + offset + sending);
 
       offset += sending;
       size -= sending;
+      }
+
+   return output;
+   }
+
+std::vector<uint8_t> Record_Layer::prepare_protected_records(const Record_Type type,
+                                                             const uint8_t data[],
+                                                             size_t size)
+   {
+   std::vector<uint8_t> output;
+
+   size_t pt_offset = 0;
+   while(size > 0)
+      {
+      secure_vector<uint8_t> fragment;
+      const size_t pt_size = std::min<size_t>(size, MAX_PLAINTEXT_SIZE);
+
+      fragment.reserve(pt_size + MAX_AEAD_EXPANSION_SIZE_TLS13
+                             + 1 /* for content type byte */);
+
+      // assemble TLSInnerPlaintext structure
+      fragment.insert(fragment.end(), data + pt_offset, data + pt_offset + pt_size);
+      fragment.push_back(static_cast<uint8_t>(type));
+      // TODO: zero padding could go here, see RFC 8446 5.4
+
+      encrypt(fragment);
+
+      output.emplace_back(static_cast<uint8_t>(Record_Type::APPLICATION_DATA));
+      output.emplace_back(0x03);
+      output.emplace_back(0x03);
+
+      const auto fragment_length = static_cast<uint16_t>(fragment.size());
+      output.emplace_back(get_byte<0>(fragment_length));
+      output.emplace_back(get_byte<1>(fragment_length));
+
+      output.insert(output.end(), fragment.cbegin(), fragment.cend());
+
+      size -= pt_size;
+      pt_offset += pt_size;
       }
 
    return output;
@@ -228,5 +268,28 @@ void Record_Layer::decrypt(Record& record)
 
    record.type = read_record_type(record.fragment.back());
    record.fragment.pop_back();
+   }
+
+void Record_Layer::encrypt(secure_vector<uint8_t>& fragment)
+   {
+   const auto key = Botan::hex_decode("db fa a6 93 d1 76 2c 5b 66 6a f5 d9 50 25 8d 01");
+   const auto iv  = Botan::hex_decode("5b d3 c7 1b 83 6e 0b 76 bb 73 26 5f");
+
+   auto enc = Botan::AEAD_Mode::create("AES-128/GCM", Botan::ENCRYPTION);
+
+   std::vector<uint8_t> ad;
+
+   ad.push_back(Record_Type::APPLICATION_DATA);
+   ad.push_back(0x03);
+   ad.push_back(0x03);
+   const auto length = static_cast<uint16_t>(enc->output_length(fragment.size()));
+   ad.push_back(get_byte<0>(length));
+   ad.push_back(get_byte<1>(length));
+
+   enc->set_key(key);
+   enc->set_associated_data_vec(ad);
+   enc->start(iv);
+
+   enc->finish(fragment);
    }
 }

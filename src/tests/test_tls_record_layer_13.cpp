@@ -369,10 +369,28 @@ read_encrypted_records() {
    };
 }
 
+std::vector<Test::Result> write_encrypted_records() {
+  auto plaintext_msg = Botan::hex_decode(
+      "14 00 00 20 a8 ec 43 6d 67 76 34 ae"
+      "52 5a c1 fc eb e1 1a 03 9e c1 76 94 fa c6 e9 85 27 b6 42 f2 ed d5 ce 61");
+
+  return {
+     CHECK("write encrypted client handshake finished", [&](Test::Result& result) {
+     auto ct = TLS::Record_Layer().prepare_protected_records(TLS::Record_Type::HANDSHAKE,
+         plaintext_msg.data(), plaintext_msg.size()); auto expected_ct =
+     Botan::hex_decode("17 03 03 00 35 75 ec 4d c2 38 cc e6"
+         "0b 29 80 44 a7 1e 21 9c 56 cc 77 b0 51 7f e9 b9 3c 7a 4b fc 44 d8 7f"
+         "38 f8 03 38 ac 98 fc 46 de b3 84 bd 1c ae ac ab 68 67 d7 26 c4 05 46");
+     result.test_eq("produced the expected ciphertext", ct, expected_ct);
+     })
+   };
+}
 }
 
 namespace Botan_Tests {
-BOTAN_REGISTER_TEST_FN("tls", "tls_record_layer_13", read_full_records, read_fragmented_records, basic_sanitization, write_records, read_encrypted_records);
-}
+BOTAN_REGISTER_TEST_FN("tls", "tls_record_layer_13",
+    basic_sanitization,
+    read_full_records, read_fragmented_records, write_records,
+    read_encrypted_records, write_encrypted_records); }
 
 #endif
