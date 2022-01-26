@@ -191,8 +191,17 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
                                                    const bool protect)
    {
    std::vector<uint8_t> output;
-   // TODO: we could pre-compute the data that will be needed for the output buffer
-   //       and .reserve() it, to avoid unnecessary re-allocations of the vector
+
+   // calculate the final buffer length to prevent unneccesary reallocations
+   const auto records = std::max((size + MAX_PLAINTEXT_SIZE - 1) / MAX_PLAINTEXT_SIZE, size_t(1));
+   auto output_length = records * TLS_HEADER_SIZE;
+   if (protect) {
+      output_length += m_cipher->encrypt_output_length(MAX_PLAINTEXT_SIZE + 1 /* for content type byte */) * (records - 1);
+      output_length += m_cipher->encrypt_output_length(size % MAX_PLAINTEXT_SIZE + 1);
+   } else {
+      output_length += size;
+   }
+   output.reserve(output_length);
 
    if (type == Record_Type::CHANGE_CIPHER_SPEC &&
        !verify_change_cipher_spec(data, size))
@@ -225,7 +234,6 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
          m_cipher->encrypt(record_header, fragment);
          BOTAN_ASSERT_NOMSG(fragment.size() == ct_size);
 
-         // TODO: could pre pre-computed before entering the sharding loop
          output.insert(output.end(), fragment.cbegin(), fragment.cend());
          }
       else
@@ -237,6 +245,7 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
       size -= pt_size;
       }
 
+   BOTAN_ASSERT_NOMSG(output.size() == output_length);
    return output;
    }
 
