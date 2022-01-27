@@ -190,6 +190,23 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
                                                    size_t size,
                                                    const bool protect)
    {
+   // RFC 8446 5.1
+   BOTAN_ASSERT(protect || type != Record_Type::APPLICATION_DATA,
+      "Application Data records MUST NOT be written to the wire unprotected");
+
+   // RFC 8446 5.1
+   //   "MUST NOT sent zero-length fragments of Handshake types"
+   //   "a record with an Alert type MUST contain exactly one message" [of non-zero length]
+   //   "Zero-length fragments of Application Data MAY be sent"
+   BOTAN_ASSERT(size != 0 || type == Record_Type::APPLICATION_DATA,
+      "zero-length fragments of types other than application data are not allowed");
+
+   if (type == Record_Type::CHANGE_CIPHER_SPEC &&
+       !verify_change_cipher_spec(data, size))
+      {
+      throw Invalid_Argument("TLS 1.3 deprecated CHANGE_CIPHER_SPEC");
+      }
+
    std::vector<uint8_t> output;
 
    // calculate the final buffer length to prevent unneccesary reallocations
@@ -203,15 +220,13 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
    }
    output.reserve(output_length);
 
-   if (type == Record_Type::CHANGE_CIPHER_SPEC &&
-       !verify_change_cipher_spec(data, size))
-      {
-      throw Invalid_Argument("TLS 1.3 deprecated CHANGE_CIPHER_SPEC");
-      }
-
    size_t pt_offset = 0;
-   while(size > 0)
-      {
+
+   // For protected records we need to write at least one encrypted fragment,
+   // even if the plaintext size is zero. This happens only for Application
+   // Data types.
+   BOTAN_ASSERT_NOMSG(size != 0 || protect);
+   do {
       const size_t pt_size = std::min<size_t>(size, MAX_PLAINTEXT_SIZE);
       const size_t ct_size = (!protect) ? pt_size : m_cipher->encrypt_output_length(pt_size + 1 /* for content type byte */);
       const auto   pt_type = (!protect) ? type : Record_Type::APPLICATION_DATA;
@@ -244,6 +259,7 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
       pt_offset += pt_size;
       size -= pt_size;
       }
+   while(size > 0);
 
    BOTAN_ASSERT_NOMSG(output.size() == output_length);
    return output;

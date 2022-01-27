@@ -115,10 +115,18 @@ std::vector<Test::Result> read_full_records()
       };
    }
 
-std::vector<Test::Result> basic_sanitization()
+std::vector<Test::Result> basic_sanitization_parse_records()
    {
    return
       {
+      CHECK("'receive' empty data", [](auto& result)
+         {
+         auto read = TLS::Record_Layer().parse_records({});
+         result.require("needs bytes", std::holds_alternative<TLS::BytesNeeded>(read));
+         result.test_eq("need all the header bytes",
+             std::get<TLS::BytesNeeded>(read), Botan::TLS::TLS_HEADER_SIZE);
+         }),
+
       CHECK("incomplete header asks for more data", [](auto& result)
          {
          std::vector<uint8_t> partial_header{'\x23', '\x03', '\x03'};
@@ -253,6 +261,12 @@ std::vector<Test::Result> write_records()
    {
    return
       {
+      CHECK("prepare an zero-length application data fragment", [&](auto& result)
+         {
+         auto record = TLS::Record_Layer().prepare_protected_records(Botan::TLS::APPLICATION_DATA, nullptr, 0);
+
+         result.require("record header was added", record.size() > Botan::TLS::TLS_HEADER_SIZE);
+         }),
       CHECK("prepare a client hello", [&](auto& result)
          {
             const auto client_hello_msg = Botan::hex_decode(  // from RFC 8448
@@ -417,7 +431,7 @@ std::vector<Test::Result> write_encrypted_records() {
 
 namespace Botan_Tests {
 BOTAN_REGISTER_TEST_FN("tls", "tls_record_layer_13",
-    basic_sanitization,
+    basic_sanitization_parse_records,
     read_full_records, read_fragmented_records, write_records,
     read_encrypted_records, write_encrypted_records); }
 
