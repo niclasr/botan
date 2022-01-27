@@ -9,12 +9,14 @@
 
 #if defined(BOTAN_HAS_TLS_13)
 
+#include <botan/secmem.h>
 #include <botan/internal/tls_cipher_state.h>
 
 namespace {
 
-namespace TLS = Botan::TLS;
 using Test = Botan_Tests::Test;
+using namespace Botan;
+using namespace Botan::TLS;
 
 // TODO: move elsewhere
 template<typename FunT>
@@ -40,21 +42,27 @@ std::vector<Test::Result> test_cs()
    {
    return
       {
-      CHECK("interface", [](auto& )
+      CHECK("interface", [](auto& result)
          {
-         Botan::secure_vector<uint8_t> early_secret;
+         auto transcript_hash = std::vector<uint8_t>{};
 
-         Cipher_State cs();
+         auto shared_secret = secure_vector<uint8_t>{};
+         auto cipher = Ciphersuite::from_name("AES_128_GCM_SHA256").value();
 
-         cs.set_psk();
+         auto cs = Cipher_State::init_with_server_hello(std::move(shared_secret), cipher, transcript_hash);
 
-         cs.set_transcript_hash_until_client_hello();
+         result.confirm("ready for encrypted handshake traffic", cs->ready_for_encrypted_handshake_traffic());
+         result.confirm("ready for encrypted application traffic", !cs->ready_for_encrypted_application_traffic());
 
-         cs.set_dh_output();
+         // cs.set_psk();
 
-         cs.set_transcript_hash_until_server_hello();
-         cs.set_transcript_hash_until_server_finished();
-         cs.set_transcript_hash_until_client_finished();
+         // cs.set_transcript_hash_until_client_hello();
+
+         // cs.set_dh_output();
+
+         // cs.set_transcript_hash_until_server_hello();
+         // cs.set_transcript_hash_until_server_finished();
+         // cs.set_transcript_hash_until_client_finished();
 
          })
       };

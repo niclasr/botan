@@ -127,9 +127,13 @@ void Client_Impl_13::process_handshake_msg(
          throw Unexpected_Message("keyshare ext not found!");
          }
 
+      // Cipher_State m_cs(sh->chosen_cipher());
+
       BOTAN_ASSERT_NOMSG(state.client_hello()->extensions().has<Key_Share>());
       auto my_keyshare = state.client_hello()->extensions().get<Key_Share>();
       const auto shared_secret = my_keyshare->exchange(sh->extensions().get<Key_Share>(), policy(), callbacks(), rng());
+
+      // advance cipher_state here
 
       callbacks().tls_examine_extensions(state.server_hello()->extensions(), SERVER);
 

@@ -9,6 +9,7 @@
 #ifndef BOTAN_TLS_RECORD_LAYER_13_H_
 #define BOTAN_TLS_RECORD_LAYER_13_H_
 
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -56,34 +57,34 @@ public:
     * with processing TLS records or a list of plaintext TLS record contents
     * containing higher level protocol or application data.
     */
-   ReadResult<std::vector<Record>> parse_records(const std::vector<uint8_t>& data_from_peer);
+   ReadResult<std::vector<Record>> parse_records(const std::vector<uint8_t>& data_from_peer,
+                                                 std::optional<Cipher_State*> cipher_state);
 
    std::vector<uint8_t> prepare_records(const Record_Type type,
                                         const uint8_t data[], size_t size)
       {
-      return prepare_records(type, data, size, false);
+      return prepare_records(type, data, size, nullptr);
       }
 
    std::vector<uint8_t> prepare_protected_records(const Record_Type type,
-                                                  const uint8_t data[], size_t size)
+                                                  const uint8_t data[], size_t size,
+                                                  Cipher_State* cipher_state)
       {
-      return prepare_records(type, data, size, true);
+      return prepare_records(type, data, size, cipher_state);
       }
 
    std::vector<uint8_t> prepare_dummy_ccs_record();
 
 private:
-   ReadResult<Record> read_record();
+   ReadResult<Record> read_record(std::optional<Cipher_State*> cipher_state);
 
    std::vector<uint8_t> prepare_records(const Record_Type type,
                                         const uint8_t data[], size_t size,
-                                        const bool protect);
+                                        Cipher_State* cipher_state);
 
 
 private:
    std::vector<uint8_t> m_read_buffer;
-
-   std::unique_ptr<Cipher_State> m_cipher;
 };
 
 }

@@ -117,20 +117,19 @@ struct TLSPlaintext_Header
 
 }  // namespace
 
-Record_Layer::Record_Layer()
-   : m_cipher(std::make_unique<Cipher_State>()) {}
-
+Record_Layer::Record_Layer() {}  // TODO will need side to call encrypt correctly
 Record_Layer::~Record_Layer() {};
 
 Record_Layer::ReadResult<std::vector<Record>>
-      Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer)
+      Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer,
+                                  std::optional<Cipher_State*> cipher_state)
    {
    std::vector<Record> records_received;
 
    m_read_buffer.insert(m_read_buffer.end(), data_from_peer.cbegin(), data_from_peer.cend());
    while(true)
       {
-      auto result = read_record();
+      auto result = read_record(cipher_state);
 
       if(std::holds_alternative<BytesNeeded>(result))
          {
@@ -146,8 +145,10 @@ Record_Layer::ReadResult<std::vector<Record>>
 std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
       const uint8_t data[],
       size_t size,
-      const bool protect)
+      Cipher_State* cipher_state)
    {
+   const bool protect = cipher_state != nullptr;
+
    // RFC 8446 5.1
    BOTAN_ASSERT(protect || type != Record_Type::APPLICATION_DATA,
                 "Application Data records MUST NOT be written to the wire unprotected");
@@ -172,8 +173,8 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
    auto output_length = records * TLS_HEADER_SIZE;
    if(protect)
       {
-      output_length += m_cipher->encrypt_output_length(MAX_PLAINTEXT_SIZE + 1 /* for content type byte */) * (records - 1);
-      output_length += m_cipher->encrypt_output_length(size % MAX_PLAINTEXT_SIZE + 1);
+      output_length += cipher_state->encrypt_output_length(MAX_PLAINTEXT_SIZE + 1 /* for content type byte */) * (records - 1);
+      output_length += cipher_state->encrypt_output_length(size % MAX_PLAINTEXT_SIZE + 1);
       }
    else
       {
@@ -190,7 +191,7 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
    do
       {
       const size_t pt_size = std::min<size_t>(size, MAX_PLAINTEXT_SIZE);
-      const size_t ct_size = (!protect) ? pt_size : m_cipher->encrypt_output_length(pt_size + 1 /* for content type byte */);
+      const size_t ct_size = (!protect) ? pt_size : cipher_state->encrypt_output_length(pt_size + 1 /* for content type byte */);
       const auto   pt_type = (!protect) ? type : Record_Type::APPLICATION_DATA;
 
       const auto record_header = TLSPlaintext_Header(pt_type, ct_size).serialize();
@@ -208,7 +209,7 @@ std::vector<uint8_t> Record_Layer::prepare_records(const Record_Type type,
          fragment.push_back(static_cast<uint8_t>(type));
          // TODO: zero padding could go here, see RFC 8446 5.4
 
-         m_cipher->encrypt(record_header, fragment);
+         cipher_state->encrypt(record_header, fragment);
          BOTAN_ASSERT_NOMSG(fragment.size() == ct_size);
 
          output.insert(output.end(), fragment.cbegin(), fragment.cend());
@@ -234,7 +235,7 @@ std::vector<uint8_t> Record_Layer::prepare_dummy_ccs_record()
    }
 
 
-Record_Layer::ReadResult<Record> Record_Layer::read_record()
+Record_Layer::ReadResult<Record> Record_Layer::read_record(std::optional<Cipher_State*> cipher_state)
    {
    if(m_read_buffer.size() < TLS_HEADER_SIZE)
       {
@@ -266,7 +267,12 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
 
    if(record.type == Record_Type::APPLICATION_DATA)
       {
-      m_cipher->decrypt({header_begin, header_end}, record.fragment);
+      if(!cipher_state.has_value())
+         throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
+                             "premature Application Data received");
+
+      BOTAN_ASSERT_NOMSG(cipher_state.value() != nullptr);
+      cipher_state.value()->decrypt({header_begin, header_end}, record.fragment);
 
       // hydrate the actual content type from TLSInnerPlaintext
       record.type = read_record_type(record.fragment.back());
