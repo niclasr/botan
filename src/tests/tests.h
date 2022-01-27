@@ -638,7 +638,7 @@ class TestFnRegistration
    };
 
 #define BOTAN_REGISTER_TEST_FN(category, name, ...) \
-   TestFnRegistration reg_ ## fn_name(category, name, __VA_ARGS__)
+   static TestFnRegistration reg_ ## fn_name(category, name, __VA_ARGS__)
 
 class VarMap
    {

@@ -465,6 +465,7 @@ namespace Botan_Tests {
 BOTAN_REGISTER_TEST_FN("tls", "tls_record_layer_13",
     basic_sanitization_parse_records,
     read_full_records, read_fragmented_records, write_records,
-    read_encrypted_records, write_encrypted_records); }
+    read_encrypted_records, write_encrypted_records);
+}
 
 #endif
