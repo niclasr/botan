@@ -12,6 +12,7 @@
 #include <botan/tls_magic.h>
 #include <botan/internal/stl_util.h>
 #include <botan/internal/tls_reader.h>
+#include <botan/tls_exceptn.h>
 
 #include <botan/internal/tls_record_layer_13.h>
 
@@ -265,7 +266,7 @@ std::vector<Test::Result> write_records()
          {
          auto record = TLS::Record_Layer().prepare_protected_records(Botan::TLS::APPLICATION_DATA, nullptr, 0);
 
-         result.require("record header was added", record.size() > Botan::TLS::TLS_HEADER_SIZE);
+         result.require("record header was added", record.size() > Botan::TLS::TLS_HEADER_SIZE + 1 /* encrypted content type */);
          }),
       CHECK("prepare a client hello", [&](auto& result)
          {
@@ -380,6 +381,15 @@ read_encrypted_records() {
             {
             TLS::Record_Layer().parse_records(short_record);
             });
+      }),
+
+      CHECK("protected Change Cipher Spec message is illegal", [](Test::Result& result) {
+         // factored message, encrypted under the same key as `encrypted_record`
+         const auto protected_ccs = Botan::hex_decode("1703030012D8EBBBE055C8167D5690EC67DEA9A525B036");
+
+         result.test_throws<Botan::TLS::TLS_Exception>("illegal state causes TLS alert", [&] {
+            TLS::Record_Layer().parse_records(protected_ccs);
+         });
       })
    };
 }

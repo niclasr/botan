@@ -308,6 +308,14 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record()
 
       // hydrate the actual content type from TLSInnerPlaintext
       record.type = read_record_type(record.fragment.back());
+
+      if (record.type == Record_Type::CHANGE_CIPHER_SPEC)
+         {
+         // RFC 8446 5
+         //  An implementation [...] which receives a protected change_cipher_spec record MUST
+         //  abort the handshake with an "unexpected_message" alert.
+         throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "protected change cipher spec received");
+         }
       record.fragment.pop_back();
       }
 
