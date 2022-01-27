@@ -129,12 +129,23 @@ struct TLSPlaintext_Header
       if (fragment_length == 0 && type != Record_Type::APPLICATION_DATA)
          throw TLS_Exception(Alert::DECODE_ERROR, "empty record received");
 
-      // RFC 8446 5.2
-      //    The length [...] is the sum of the lengths of the content and the
-      //    padding, plus one for the inner content type, plus any expansion
-      //    added by the AEAD algorithm. The length MUST NOT exceed 2^14 + 256 bytes.
-      if (fragment_length > MAX_CIPHERTEXT_SIZE_TLS13)
-         throw TLS_Exception(Alert::RECORD_OVERFLOW, "overflowing record received");
+      if (type == Record_Type::APPLICATION_DATA)
+         {
+         // RFC 8446 5.2
+         //    The length [...] is the sum of the lengths of the content and the
+         //    padding, plus one for the inner content type, plus any expansion
+         //    added by the AEAD algorithm. The length MUST NOT exceed 2^14 + 256 bytes.
+         if (fragment_length > MAX_CIPHERTEXT_SIZE_TLS13)
+            throw TLS_Exception(Alert::RECORD_OVERFLOW, "overflowing record received");
+         }
+      else
+         {
+         // RFC 8446 5.1
+         //    The length MUST NOT exceed 2^14 bytes.  An endpoint that receives a record that
+         //    exceeds this length MUST terminate the connection with a "record_overflow" alert.
+         if (fragment_length > MAX_PLAINTEXT_SIZE)
+            throw TLS_Exception(Alert::RECORD_OVERFLOW, "overflowing record received");
+         }
       }
 
    TLSPlaintext_Header(const Record_Type type, const size_t fragment_length)

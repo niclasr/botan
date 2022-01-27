@@ -156,18 +156,40 @@ std::vector<Test::Result> basic_sanitization_parse_records()
             });
          }),
 
-      CHECK("received the maximum size of a default record", [](auto& result)
+      CHECK("tries to decrypt a (protected) application data record "
+            "(doesn't exit early as overflow alert)", [](Test::Result& result)
          {
-         std::vector<uint8_t> full_record{'\x16', '\x03', '\x03', '\x41', '\x00'};
+         std::vector<uint8_t> full_record{'\x17', '\x03', '\x03', '\x41', '\x00'};
          full_record.resize(TLS::MAX_CIPHERTEXT_SIZE_TLS13 + TLS::TLS_HEADER_SIZE);
+
+         result.test_throws<Botan::Invalid_Authentication_Tag>("broken record detected", [&]
+            {
+            TLS::Record_Layer().parse_records(full_record);
+            });
+         }),
+
+      CHECK("received the maximum size of an unprotected record", [](auto& result)
+         {
+         std::vector<uint8_t> full_record{'\x16', '\x03', '\x03', '\x40', '\x00'};
+         full_record.resize(TLS::MAX_PLAINTEXT_SIZE + TLS::TLS_HEADER_SIZE);
          auto read = TLS::Record_Layer().parse_records(full_record);
          result.confirm("returned 'record'", !std::holds_alternative<TLS::BytesNeeded>(read));
          }),
 
-      CHECK("received too many bytes in one record", [](auto& result)
+      CHECK("received too many bytes in one protected record", [](auto& result)
          {
          std::vector<uint8_t> huge_record{'\x17', '\x03', '\x03', '\x41', '\x01'};
          huge_record.resize(TLS::MAX_CIPHERTEXT_SIZE_TLS13 + TLS::TLS_HEADER_SIZE + 1);
+         result.test_throws("record too big", "overflowing record received", [&]
+            {
+            TLS::Record_Layer().parse_records(huge_record);
+            });
+         }),
+
+      CHECK("received too many bytes in one unprotected record", [](auto& result)
+         {
+         std::vector<uint8_t> huge_record{'\x16', '\x03', '\x03', '\x40', '\x01'};
+         huge_record.resize(TLS::MAX_PLAINTEXT_SIZE + TLS::TLS_HEADER_SIZE + 1);
          result.test_throws("record too big", "overflowing record received", [&]
             {
             TLS::Record_Layer().parse_records(huge_record);
