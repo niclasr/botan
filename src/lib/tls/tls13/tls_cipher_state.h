@@ -16,6 +16,7 @@
 #include <botan/secmem.h>
 #include <botan/tls_ciphersuite.h>
 #include <botan/hash.h>
+#include <botan/tls_magic.h>
 
 #include <botan/internal/hkdf.h>
 #include <botan/internal/hmac.h>
@@ -100,11 +101,12 @@ class Cipher_State
        * Construct a Cipher_State after receiving a server hello message.
        */
       static std::unique_ptr<Cipher_State> init_with_server_hello(
+         const Connection_Side side,
          secure_vector<uint8_t>&& shared_secret,
          const Ciphersuite& cipher,
          const std::vector<uint8_t>& transcript_hash)
          {
-         auto cs = std::unique_ptr<Cipher_State>(new Cipher_State(cipher));
+         auto cs = std::unique_ptr<Cipher_State>(new Cipher_State(side, cipher));
          cs->advance_without_psk();
          cs->advance_with_server_hello(std::move(shared_secret), transcript_hash);
          return cs;
@@ -171,8 +173,13 @@ class Cipher_State
          return std::make_unique<HMAC>(HashFunction::create_or_throw(cipher.prf_algo()));
          }
 
-      Cipher_State(const Ciphersuite& cipher)
+      /**
+       * @param cipher  the negotiated cipher suite
+       * @param whoami  whether we play the SERVER or CLIENT
+       */
+      Cipher_State(Connection_Side whoami, const Ciphersuite& cipher)
          : m_state(State::Uninitialized)
+         , m_connection_side(whoami)
          , m_hash_length(hash_output_length(cipher))
          , m_encrypt(AEAD_Mode::create(cipher.cipher_algo(), ENCRYPTION))
          , m_decrypt(AEAD_Mode::create(cipher.cipher_algo(), DECRYPTION))
@@ -196,12 +203,34 @@ class Cipher_State
          BOTAN_ASSERT_NOMSG(m_state == State::EarlyTraffic);
 
          const auto handshake_secret = hkdf_extract(std::move(shared_secret));
-         auto cl_hs_tr = derive_secret(handshake_secret, "c hs traffic", transcript_hash);
-         auto sv_hs_tr = derive_secret(handshake_secret, "s hs traffic", transcript_hash);
+
+         derive_traffic_secrets(
+            derive_secret(handshake_secret, "c hs traffic", transcript_hash),
+            derive_secret(handshake_secret, "s hs traffic", transcript_hash));
 
          m_salt = derive_secret(handshake_secret, "derived");
 
-         m_state = State::EarlyTraffic;
+         m_state = State::HandshakeTraffic;
+         }
+
+      void derive_traffic_secrets(secure_vector<uint8_t> client_traffic_secret,
+                                  secure_vector<uint8_t> server_traffic_secret)
+         {
+         const auto& traffic_secret =
+            (m_connection_side == Connection_Side::CLIENT)
+               ? client_traffic_secret
+               : server_traffic_secret;
+
+         const auto& peer_traffic_secret =
+            (m_connection_side == Connection_Side::SERVER)
+               ? client_traffic_secret
+               : server_traffic_secret;
+
+         m_write_key = hkdf_expand_label(traffic_secret, "key", {}, m_encrypt->minimum_keylength());
+         m_peer_write_key = hkdf_expand_label(peer_traffic_secret, "key", {}, m_decrypt->minimum_keylength());
+
+         m_write_iv = hkdf_expand_label(traffic_secret, "iv", {}, m_encrypt->default_nonce_length());
+         m_peer_write_iv = hkdf_expand_label(peer_traffic_secret, "iv", {}, m_decrypt->default_nonce_length());
          }
 
       /**
@@ -213,6 +242,37 @@ class Cipher_State
          }
 
       /**
+       * HKDF-Expand-Label from RFC 8446 7.1
+       */
+      secure_vector<uint8_t> hkdf_expand_label(
+          const secure_vector<uint8_t>& secret,
+          std::string                   label,
+          const std::vector<uint8_t>&   context,
+          const size_t                  length)
+         {
+         // assemble (serialized) HkdfLabel
+         std::vector<uint8_t> hkdf_label;
+         hkdf_label.reserve(2 /* length */ + (label.size() + 6 /* 'tls13 ' */) + context.size());
+
+         // length
+         BOTAN_ASSERT_NOMSG(length <= std::numeric_limits<uint16_t>::max());
+         const auto len = static_cast<uint16_t>(length);
+         hkdf_label.push_back(get_byte<0>(len));
+         hkdf_label.push_back(get_byte<1>(len));
+
+         // label
+         const std::string prefix = "tls13 ";
+         hkdf_label.insert(hkdf_label.end(), prefix.cbegin(), prefix.cend());
+         hkdf_label.insert(hkdf_label.end(), label.cbegin(), label.cend());
+
+         // context
+         hkdf_label.insert(hkdf_label.end(), context.cbegin(), context.cend());
+
+         // HKDF-Expand
+         return m_expand->derive_key(length, secret, hkdf_label, std::vector<uint8_t>() /* just pleasing botan's interface */);
+         }
+
+      /**
        * Derive-Secret from RFC 8446 7.1
        */
       secure_vector<uint8_t> derive_secret(
@@ -220,22 +280,7 @@ class Cipher_State
           std::string label,
           const std::vector<uint8_t>& messages={})
       {
-         // assemble (serialized) HkdfLabel
-         std::vector<uint8_t> hkdf_label;
-         hkdf_label.reserve(2+ label.size()+6  + messages.size());
-
-         uint16_t len = m_hash_length;
-         hkdf_label.push_back(get_byte<0>(len));
-         hkdf_label.push_back(get_byte<1>(len));
-
-         const std::string prefix = "tls13 ";
-         hkdf_label.insert(hkdf_label.end(), prefix.cbegin(), prefix.cend());
-         hkdf_label.insert(hkdf_label.end(), label.cbegin(), label.cend());
-
-         hkdf_label.insert(hkdf_label.end(), messages.cbegin(), messages.cend());
-
-         // HKDF-Expand
-         return m_expand->derive_key(m_hash_length, secret, hkdf_label, std::vector<uint8_t>());
+         return hkdf_expand_label(secret, label, messages, m_hash_length);
       }
 
    private:
@@ -249,7 +294,8 @@ class Cipher_State
          };
 
    private:
-      State m_state;
+      State           m_state;
+      Connection_Side m_connection_side;
 
       const size_t m_hash_length;
 

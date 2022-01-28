@@ -48,7 +48,7 @@ std::vector<Test::Result> test_state_machine()
          auto shared_secret = secure_vector<uint8_t> {};
          auto cipher = Ciphersuite::from_name("AES_128_GCM_SHA256").value();
 
-         auto cs = Cipher_State::init_with_server_hello(std::move(shared_secret), cipher, transcript_hash);
+         auto cs = Cipher_State::init_with_server_hello(Connection_Side::CLIENT, std::move(shared_secret), cipher, transcript_hash);
          result.test_no_throw("can advance with server finished", [&] { cs->advance_with_server_finished(transcript_hash); });
 
          result.test_throws<Botan::Invalid_State>("cannot advance to completed state", [&]
@@ -150,7 +150,7 @@ std::vector<Test::Result> test_secret_derivation_rfc8448_rtt1()
          auto cipher = Ciphersuite::from_name("AES_128_GCM_SHA256").value();
 
          auto my_shared_secret = shared_secret;
-         auto cs = Cipher_State::init_with_server_hello(std::move(my_shared_secret), cipher, transcript_hash);
+         auto cs = Cipher_State::init_with_server_hello(Connection_Side::CLIENT, std::move(my_shared_secret), cipher, transcript_hash);
 
          auto encrypted_fragment = encrypted_extensions.encrypted_fragment;
          result.test_no_throw("decryption is successful", [&] { cs->decrypt(encrypted_extensions.record_header, encrypted_fragment); });

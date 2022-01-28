@@ -48,7 +48,7 @@ std::unique_ptr<TLS::Cipher_State> rfc8448_rtt1_handshake_traffic()
    auto transcript_hash = std::vector<uint8_t> {};
    auto shared_secret = Botan::secure_vector<uint8_t> {};
    auto cipher = TLS::Ciphersuite::from_name("AES_128_GCM_SHA256").value();
-   return TLS::Cipher_State::init_with_server_hello(std::move(shared_secret), cipher, transcript_hash);
+   return TLS::Cipher_State::init_with_server_hello(TLS::Connection_Side::CLIENT, std::move(shared_secret), cipher, transcript_hash);
    }
 
 decltype(auto) parse_records(const std::vector<uint8_t>& data, TLS::Cipher_State* cs=nullptr)
