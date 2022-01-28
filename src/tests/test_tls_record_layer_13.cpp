@@ -45,8 +45,12 @@ Test::Result CHECK(const char* name, FunT check_fun)
 
 std::unique_ptr<TLS::Cipher_State> rfc8448_rtt1_handshake_traffic()
    {
-   auto transcript_hash = std::vector<uint8_t> {};
-   auto shared_secret = Botan::secure_vector<uint8_t> {};
+   const auto transcript_hash = Botan::hex_decode_locked(
+            "86 0c 06 ed c0 78 58 ee 8e 78 f0 e7 42 8c 58 ed"
+            "d6 b4 3f 2c a3 e6 e9 5f 02 ed 06 3c f0 e1 ca d8");
+   auto shared_secret = Botan::hex_decode_locked(
+           "8b d4 05 4f b5 5b 9d 63 fd fb ac f9 f0 4b 9f 0d"
+           "35 e6 d6 3f 53 75 63 ef d4 62 72 90 0f 89 49 2d");
    auto cipher = TLS::Ciphersuite::from_name("AES_128_GCM_SHA256").value();
    return TLS::Cipher_State::init_with_server_hello(TLS::Connection_Side::CLIENT, std::move(shared_secret), cipher, transcript_hash);
    }

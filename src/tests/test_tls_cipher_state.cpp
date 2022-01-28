@@ -44,7 +44,7 @@ std::vector<Test::Result> test_state_machine()
       {
       CHECK("interface", [](Test::Result& result)
          {
-         auto transcript_hash = std::vector<uint8_t> {};
+         auto transcript_hash = secure_vector<uint8_t> {};
          auto shared_secret = secure_vector<uint8_t> {};
          auto cipher = Ciphersuite::from_name("AES_128_GCM_SHA256").value();
 
@@ -69,7 +69,9 @@ struct RFC8448_TestData
 std::vector<Test::Result> test_secret_derivation_rfc8448_rtt1()
    {
    // shared secret
-   const auto shared_secret = secure_vector<uint8_t>();
+   const auto shared_secret = Botan::hex_decode_locked(
+           "8b d4 05 4f b5 5b 9d 63 fd fb ac f9 f0 4b 9f 0d"
+           "35 e6 d6 3f 53 75 63 ef d4 62 72 90 0f 89 49 2d");
 
    // encrypted with server_handshake_traffic_secret
    const auto encrypted_extensions = RFC8448_TestData{
@@ -146,7 +148,10 @@ std::vector<Test::Result> test_secret_derivation_rfc8448_rtt1()
       {
       CHECK("handshake traffic without PSK", [&](Test::Result& result)
          {
-         auto transcript_hash = std::vector<uint8_t> {};
+         auto transcript_hash = Botan::hex_decode_locked(
+            "86 0c 06 ed c0 78 58 ee 8e 78 f0 e7 42 8c 58 ed"
+            "d6 b4 3f 2c a3 e6 e9 5f 02 ed 06 3c f0 e1 ca d8");
+
          auto cipher = Ciphersuite::from_name("AES_128_GCM_SHA256").value();
 
          auto my_shared_secret = shared_secret;
@@ -156,11 +161,6 @@ std::vector<Test::Result> test_secret_derivation_rfc8448_rtt1()
          result.test_no_throw("decryption is successful", [&] { cs->decrypt(encrypted_extensions.record_header, encrypted_fragment); });
 
          result.test_eq("encrypted extensions", encrypted_fragment, encrypted_extensions.plaintext_fragment);
-
-         result.test_throws<Botan::Invalid_State>("cannot advance to completed state", [&]
-            {
-            cs->advance_with_client_finished(transcript_hash);
-            });
          })
       };
    }

@@ -104,7 +104,7 @@ class Cipher_State
          const Connection_Side side,
          secure_vector<uint8_t>&& shared_secret,
          const Ciphersuite& cipher,
-         const std::vector<uint8_t>& transcript_hash)
+         const secure_vector<uint8_t>& transcript_hash)
          {
          auto cs = std::unique_ptr<Cipher_State>(new Cipher_State(side, cipher));
          cs->advance_without_psk();
@@ -112,12 +112,16 @@ class Cipher_State
          return cs;
          }
 
-      void advance_with_server_finished(const std::vector<uint8_t>& transcript_hash)
+      void advance_with_server_finished(const secure_vector<uint8_t>& transcript_hash)
          {
          BOTAN_ASSERT_NOMSG(m_state == State::HandshakeTraffic);
+
+         // TODO: Implement
+
+         m_state = State::ApplicationTraffic;
          }
 
-      void advance_with_client_finished(const std::vector<uint8_t>& transcript_hash)
+      void advance_with_client_finished(const secure_vector<uint8_t>& transcript_hash)
          {
          BOTAN_ASSERT_NOMSG(m_state == State::ApplicationTraffic);
          throw Invalid_State("nyi");
@@ -163,11 +167,6 @@ class Cipher_State
          }
 
    private:
-      static size_t hash_output_length(const Ciphersuite& cipher)
-         {
-         return HashFunction::create_or_throw(cipher.prf_algo())->output_length();
-         }
-
       static std::unique_ptr<MessageAuthenticationCode> create_hmac(const Ciphersuite& cipher)
          {
          return std::make_unique<HMAC>(HashFunction::create_or_throw(cipher.prf_algo()));
@@ -180,25 +179,25 @@ class Cipher_State
       Cipher_State(Connection_Side whoami, const Ciphersuite& cipher)
          : m_state(State::Uninitialized)
          , m_connection_side(whoami)
-         , m_hash_length(hash_output_length(cipher))
          , m_encrypt(AEAD_Mode::create(cipher.cipher_algo(), ENCRYPTION))
          , m_decrypt(AEAD_Mode::create(cipher.cipher_algo(), DECRYPTION))
+         , m_hash(HashFunction::create_or_throw(cipher.prf_algo()))
          , m_extract(std::make_unique<HKDF_Extract>(create_hmac(cipher)))
          , m_expand(std::make_unique<HKDF_Expand>(create_hmac(cipher)))
-         , m_salt(m_hash_length, 0x00) {}
+         , m_salt(m_hash->output_length(), 0x00) {}
 
       void advance_without_psk()
          {
          BOTAN_ASSERT_NOMSG(m_state == State::Uninitialized);
 
-         const auto early_secret = hkdf_extract(secure_vector<uint8_t>(m_hash_length, 0x00));
-         m_salt = derive_secret(early_secret, "derived");
+         const auto early_secret = hkdf_extract(secure_vector<uint8_t>(m_hash->output_length(), 0x00));
+         m_salt = derive_secret(early_secret, "derived", m_hash->process(""));
 
          m_state = State::EarlyTraffic;
          }
 
       void advance_with_server_hello(secure_vector<uint8_t>&& shared_secret,
-                                     const std::vector<uint8_t>& transcript_hash)
+                                     const secure_vector<uint8_t>& transcript_hash)
          {
          BOTAN_ASSERT_NOMSG(m_state == State::EarlyTraffic);
 
@@ -208,7 +207,7 @@ class Cipher_State
             derive_secret(handshake_secret, "c hs traffic", transcript_hash),
             derive_secret(handshake_secret, "s hs traffic", transcript_hash));
 
-         m_salt = derive_secret(handshake_secret, "derived");
+         m_salt = derive_secret(handshake_secret, "derived", m_hash->process(""));
 
          m_state = State::HandshakeTraffic;
          }
@@ -218,13 +217,13 @@ class Cipher_State
          {
          const auto& traffic_secret =
             (m_connection_side == Connection_Side::CLIENT)
-               ? client_traffic_secret
-               : server_traffic_secret;
+            ? client_traffic_secret
+            : server_traffic_secret;
 
          const auto& peer_traffic_secret =
             (m_connection_side == Connection_Side::SERVER)
-               ? client_traffic_secret
-               : server_traffic_secret;
+            ? client_traffic_secret
+            : server_traffic_secret;
 
          m_write_key = hkdf_expand_label(traffic_secret, "key", {}, m_encrypt->minimum_keylength());
          m_peer_write_key = hkdf_expand_label(peer_traffic_secret, "key", {}, m_decrypt->minimum_keylength());
@@ -237,22 +236,23 @@ class Cipher_State
        * HKDF-Extract from RFC 8446 7.1
        */
       secure_vector<uint8_t> hkdf_extract(secure_vector<uint8_t>&& ikm)
-          {
-         return m_extract->derive_key(m_hash_length, ikm, m_salt, std::vector<uint8_t>());
+         {
+         return m_extract->derive_key(m_hash->output_length(), ikm, m_salt, std::vector<uint8_t>());
          }
 
       /**
        * HKDF-Expand-Label from RFC 8446 7.1
        */
       secure_vector<uint8_t> hkdf_expand_label(
-          const secure_vector<uint8_t>& secret,
-          std::string                   label,
-          const std::vector<uint8_t>&   context,
-          const size_t                  length)
+         const secure_vector<uint8_t>& secret,
+         std::string                   label,
+         const secure_vector<uint8_t>& context,
+         const size_t                  length)
          {
          // assemble (serialized) HkdfLabel
-         std::vector<uint8_t> hkdf_label;
-         hkdf_label.reserve(2 /* length */ + (label.size() + 6 /* 'tls13 ' */) + context.size());
+         secure_vector<uint8_t> hkdf_label;
+         hkdf_label.reserve(2 /* length */ + (label.size() + 6 /* 'tls13 ' */ + 1 /* length field*/) +
+                            (context.size() + 1 /* length field*/));
 
          // length
          BOTAN_ASSERT_NOMSG(length <= std::numeric_limits<uint16_t>::max());
@@ -262,10 +262,12 @@ class Cipher_State
 
          // label
          const std::string prefix = "tls13 ";
+         hkdf_label.push_back(prefix.size() + label.size());
          hkdf_label.insert(hkdf_label.end(), prefix.cbegin(), prefix.cend());
          hkdf_label.insert(hkdf_label.end(), label.cbegin(), label.cend());
 
          // context
+         hkdf_label.push_back(context.size());
          hkdf_label.insert(hkdf_label.end(), context.cbegin(), context.cend());
 
          // HKDF-Expand
@@ -276,12 +278,12 @@ class Cipher_State
        * Derive-Secret from RFC 8446 7.1
        */
       secure_vector<uint8_t> derive_secret(
-          const secure_vector<uint8_t>& secret,
-          std::string label,
-          const std::vector<uint8_t>& messages={})
-      {
-         return hkdf_expand_label(secret, label, messages, m_hash_length);
-      }
+         const secure_vector<uint8_t>& secret,
+         std::string label,
+         const secure_vector<uint8_t>& messages_hash)
+         {
+         return hkdf_expand_label(secret, label, messages_hash, m_hash->output_length());
+         }
 
    private:
       enum class State
@@ -297,13 +299,12 @@ class Cipher_State
       State           m_state;
       Connection_Side m_connection_side;
 
-      const size_t m_hash_length;
-
       std::unique_ptr<AEAD_Mode> m_encrypt;
       std::unique_ptr<AEAD_Mode> m_decrypt;
 
       std::unique_ptr<HKDF_Extract> m_extract;
       std::unique_ptr<HKDF_Expand>  m_expand;
+      std::unique_ptr<HashFunction> m_hash;
 
       secure_vector<uint8_t> m_salt;
 
