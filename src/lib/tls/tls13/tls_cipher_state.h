@@ -15,6 +15,10 @@
 #include <botan/hex.h>
 #include <botan/secmem.h>
 #include <botan/tls_ciphersuite.h>
+#include <botan/hash.h>
+
+#include <botan/internal/hkdf.h>
+#include <botan/internal/hmac.h>
 
 namespace Botan::TLS {
 
@@ -38,6 +42,7 @@ namespace Botan::TLS {
  *                               Derive-Secret(., "derived", "")
  *                                     |
  *                                     *
+ *                             STATE EARLY TRAFFIC
  * This state is reached by constructing Cipher_State using init_with_psk() (not yet implemented).
  * The state can then be further advanced using advance_with_server_hello().
  *                                     *
@@ -56,6 +61,7 @@ namespace Botan::TLS {
  *                               Derive-Secret(., "derived", "")
  *                                     |
  *                                     *
+ *                          STATE HANDSHAKE TRAFFIC
  * This state is reached by constructing Cipher_State using init_with_server_hello().
  * In this state the handshake traffic secrets are available. The state can then be further
  * advanced using advance_with_server_finished().
@@ -76,6 +82,7 @@ namespace Botan::TLS {
  *                                     |                     ClientHello...server Finished)
  *                                     |                     = exporter_master_secret
  *                                     *
+ *                         STATE APPLICATION TRAFFIC
  * This state is reached by calling advance_with_server_finished(). The state can then be further
  * advanced using advance_with_client_finished().
  *                                     *
@@ -83,6 +90,7 @@ namespace Botan::TLS {
  *                                     +-----> Derive-Secret(., "res master",
  *                                                           ClientHello...client Finished)
  *                                                           = resumption_master_secret
+ *                             STATE COMPLETED
  */
 class Cipher_State
    {
@@ -95,18 +103,19 @@ class Cipher_State
          const Ciphersuite& cipher,
          const std::vector<uint8_t>& transcript_hash)
          {
-         return std::unique_ptr<Cipher_State>(new Cipher_State(cipher));
+         auto cs = std::unique_ptr<Cipher_State>(new Cipher_State(cipher));
+         cs->advance_without_psk();
+         return cs;
          }
 
-      bool ready_for_encrypted_handshake_traffic() const
-         {
-         return true;
-         }
+      void advance_with_server_finished(const std::vector<uint8_t>& transcript_hash)
+      {
+      }
 
-      bool ready_for_encrypted_application_traffic() const
-         {
-         return true;
-         }
+      void advance_with_client_finished(const std::vector<uint8_t>& transcript_hash)
+      {
+        throw Invalid_State("nyi");
+      }
 
       void encrypt(const std::vector<uint8_t>& header, secure_vector<uint8_t>& fragment)
          {
@@ -124,9 +133,9 @@ class Cipher_State
          const auto key = Botan::hex_decode("3f ce 51 60 09 c2 17 27 d0 f2 e4 e8 6e e4 03 bc");
          const auto iv  = Botan::hex_decode("5d 31 3e b2 67 12 76 ee 13 00 0b 30");
 
-         m_decrypt->set_key(key);
+         m_decrypt->set_key(m_peer_write_key);
          m_decrypt->set_associated_data_vec(header);
-         m_decrypt->start(iv);
+         m_decrypt->start(m_peer_write_iv);
 
          try
             {
@@ -148,12 +157,46 @@ class Cipher_State
          }
 
    private:
+      static size_t hash_output_length(const Ciphersuite& cipher)
+         {
+         return HashFunction::create_or_throw(cipher.prf_algo())->output_length();
+         }
+
+      static std::unique_ptr<MessageAuthenticationCode> create_hmac(const Ciphersuite& cipher)
+         {
+         return std::make_unique<HMAC>(HashFunction::create_or_throw(cipher.prf_algo()));
+         }
+
       Cipher_State(const Ciphersuite& cipher)
-         : m_encrypt(AEAD_Mode::create(cipher.cipher_algo(), ENCRYPTION))
-         , m_decrypt(AEAD_Mode::create(cipher.cipher_algo(), DECRYPTION)) {}
+         : m_hash_length(hash_output_length(cipher))
+         , m_encrypt(AEAD_Mode::create(cipher.cipher_algo(), ENCRYPTION))
+         , m_decrypt(AEAD_Mode::create(cipher.cipher_algo(), DECRYPTION))
+         , m_extract(std::make_unique<HKDF_Extract>(create_hmac(cipher)))
+         , m_expand(std::make_unique<HKDF_Expand>(create_hmac(cipher)))
+         , m_salt(m_hash_length, 0x00) {}
+
+      void advance_without_psk()
+         {
+         const auto psk = std::vector<uint8_t>(m_hash_length, 0x00);
+         const auto early_secret = m_extract->derive_key(m_hash_length, psk, m_salt, std::vector<uint8_t>());
+         m_salt = m_expand->derive_key(m_hash_length, early_secret, "", "derived");
+         }
+
+   private:
+      const size_t m_hash_length;
 
       std::unique_ptr<AEAD_Mode> m_encrypt;
       std::unique_ptr<AEAD_Mode> m_decrypt;
+
+      std::unique_ptr<HKDF_Extract> m_extract;
+      std::unique_ptr<HKDF_Expand>  m_expand;
+
+      secure_vector<uint8_t> m_salt;
+
+      secure_vector<uint8_t> m_write_key;
+      secure_vector<uint8_t> m_write_iv;
+      secure_vector<uint8_t> m_peer_write_key;
+      secure_vector<uint8_t> m_peer_write_iv;
    };
 
 }

@@ -14,4 +14,5 @@ tls_cipher_state.h
 </header:internal>
 
 <requires>
+hkdf
 </requires>
