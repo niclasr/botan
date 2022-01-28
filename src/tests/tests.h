@@ -460,6 +460,8 @@ class Test
                   }
                }
 
+            bool test_no_throw(const std::string& what, std::function<void ()> fn);
+
             void set_ns_consumed(uint64_t ns)
                {
                m_ns_taken = ns;
