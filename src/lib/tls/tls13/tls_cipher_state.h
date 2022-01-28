@@ -19,6 +19,7 @@
 
 #include <botan/internal/hkdf.h>
 #include <botan/internal/hmac.h>
+#include <botan/internal/loadstor.h>
 
 namespace Botan::TLS {
 
@@ -105,17 +106,20 @@ class Cipher_State
          {
          auto cs = std::unique_ptr<Cipher_State>(new Cipher_State(cipher));
          cs->advance_without_psk();
+         cs->advance_with_server_hello(std::move(shared_secret), transcript_hash);
          return cs;
          }
 
       void advance_with_server_finished(const std::vector<uint8_t>& transcript_hash)
-      {
-      }
+         {
+         BOTAN_ASSERT_NOMSG(m_state == State::HandshakeTraffic);
+         }
 
       void advance_with_client_finished(const std::vector<uint8_t>& transcript_hash)
-      {
-        throw Invalid_State("nyi");
-      }
+         {
+         BOTAN_ASSERT_NOMSG(m_state == State::ApplicationTraffic);
+         throw Invalid_State("nyi");
+         }
 
       void encrypt(const std::vector<uint8_t>& header, secure_vector<uint8_t>& fragment)
          {
@@ -168,7 +172,8 @@ class Cipher_State
          }
 
       Cipher_State(const Ciphersuite& cipher)
-         : m_hash_length(hash_output_length(cipher))
+         : m_state(State::Uninitialized)
+         , m_hash_length(hash_output_length(cipher))
          , m_encrypt(AEAD_Mode::create(cipher.cipher_algo(), ENCRYPTION))
          , m_decrypt(AEAD_Mode::create(cipher.cipher_algo(), DECRYPTION))
          , m_extract(std::make_unique<HKDF_Extract>(create_hmac(cipher)))
@@ -177,12 +182,75 @@ class Cipher_State
 
       void advance_without_psk()
          {
-         const auto psk = std::vector<uint8_t>(m_hash_length, 0x00);
-         const auto early_secret = m_extract->derive_key(m_hash_length, psk, m_salt, std::vector<uint8_t>());
-         m_salt = m_expand->derive_key(m_hash_length, early_secret, "", "derived");
+         BOTAN_ASSERT_NOMSG(m_state == State::Uninitialized);
+
+         const auto early_secret = hkdf_extract(secure_vector<uint8_t>(m_hash_length, 0x00));
+         m_salt = derive_secret(early_secret, "derived");
+
+         m_state = State::EarlyTraffic;
          }
 
+      void advance_with_server_hello(secure_vector<uint8_t>&& shared_secret,
+                                     const std::vector<uint8_t>& transcript_hash)
+         {
+         BOTAN_ASSERT_NOMSG(m_state == State::EarlyTraffic);
+
+         const auto handshake_secret = hkdf_extract(std::move(shared_secret));
+         auto cl_hs_tr = derive_secret(handshake_secret, "c hs traffic", transcript_hash);
+         auto sv_hs_tr = derive_secret(handshake_secret, "s hs traffic", transcript_hash);
+
+         m_salt = derive_secret(handshake_secret, "derived");
+
+         m_state = State::EarlyTraffic;
+         }
+
+      /**
+       * HKDF-Extract from RFC 8446 7.1
+       */
+      secure_vector<uint8_t> hkdf_extract(secure_vector<uint8_t>&& ikm)
+          {
+         return m_extract->derive_key(m_hash_length, ikm, m_salt, std::vector<uint8_t>());
+         }
+
+      /**
+       * Derive-Secret from RFC 8446 7.1
+       */
+      secure_vector<uint8_t> derive_secret(
+          const secure_vector<uint8_t>& secret,
+          std::string label,
+          const std::vector<uint8_t>& messages={})
+      {
+         // assemble (serialized) HkdfLabel
+         std::vector<uint8_t> hkdf_label;
+         hkdf_label.reserve(2+ label.size()+6  + messages.size());
+
+         uint16_t len = m_hash_length;
+         hkdf_label.push_back(get_byte<0>(len));
+         hkdf_label.push_back(get_byte<1>(len));
+
+         const std::string prefix = "tls13 ";
+         hkdf_label.insert(hkdf_label.end(), prefix.cbegin(), prefix.cend());
+         hkdf_label.insert(hkdf_label.end(), label.cbegin(), label.cend());
+
+         hkdf_label.insert(hkdf_label.end(), messages.cbegin(), messages.cend());
+
+         // HKDF-Expand
+         return m_expand->derive_key(m_hash_length, secret, hkdf_label, std::vector<uint8_t>());
+      }
+
    private:
+      enum class State
+         {
+         Uninitialized,
+         EarlyTraffic,
+         HandshakeTraffic,
+         ApplicationTraffic,
+         Completed
+         };
+
+   private:
+      State m_state;
+
       const size_t m_hash_length;
 
       std::unique_ptr<AEAD_Mode> m_encrypt;
