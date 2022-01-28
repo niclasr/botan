@@ -44,7 +44,8 @@ size_t Channel_Impl_13::received_data(const uint8_t input[], size_t input_size)
    {
    try
       {
-      const auto result = m_record_layer.parse_records(std::vector(input, input+input_size), std::nullopt);
+      const auto result = m_record_layer.parse_records(std::vector(input, input+input_size), nullptr);
+
       BOTAN_ASSERT(input_size == 0 || !std::holds_alternative<BytesNeeded>(result),
                    "Got a full record or consumed all input");
 

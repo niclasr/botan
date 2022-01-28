@@ -43,17 +43,17 @@ Test::Result CHECK(const char* name, FunT check_fun)
    return r;
    }
 
-decltype(auto) parse_records(const std::vector<uint8_t>& data)
-   {
-   return TLS::Record_Layer().parse_records(data, std::nullopt);
-   }
-
 std::unique_ptr<TLS::Cipher_State> rfc8448_rtt1_handshake_traffic()
    {
    auto transcript_hash = std::vector<uint8_t> {};
    auto shared_secret = Botan::secure_vector<uint8_t> {};
    auto cipher = TLS::Ciphersuite::from_name("AES_128_GCM_SHA256").value();
    return TLS::Cipher_State::init_with_server_hello(std::move(shared_secret), cipher, transcript_hash);
+   }
+
+decltype(auto) parse_records(const std::vector<uint8_t>& data, TLS::Cipher_State* cs=nullptr)
+   {
+   return TLS::Record_Layer().parse_records(data, cs);
    }
 
 std::vector<Test::Result> read_full_records()
@@ -176,9 +176,10 @@ std::vector<Test::Result> basic_sanitization_parse_records()
          std::vector<uint8_t> full_record{'\x17', '\x03', '\x03', '\x41', '\x00'};
          full_record.resize(TLS::MAX_CIPHERTEXT_SIZE_TLS13 + TLS::TLS_HEADER_SIZE);
 
+         auto cs = rfc8448_rtt1_handshake_traffic();
          result.test_throws<Botan::Invalid_Authentication_Tag>("broken record detected", [&]
             {
-            parse_records(full_record);
+            parse_records(full_record, cs.get());
             });
          }),
 
@@ -256,13 +257,13 @@ std::vector<Test::Result> read_fragmented_records()
          {
          std::vector<uint8_t> ccs_record{'\x14', '\x03', '\x03', '\x00', '\x01', '\x01'};
 
-         wait_for_more_bytes(4, rl.parse_records({'\x14'}, std::nullopt), result);
-         wait_for_more_bytes(3, rl.parse_records({'\x03'}, std::nullopt), result);
-         wait_for_more_bytes(2, rl.parse_records({'\x03'}, std::nullopt), result);
-         wait_for_more_bytes(1, rl.parse_records({'\x00'}, std::nullopt), result);
-         wait_for_more_bytes(1, rl.parse_records({'\x01'}, std::nullopt), result);
+         wait_for_more_bytes(4, rl.parse_records({'\x14'}), result);
+         wait_for_more_bytes(3, rl.parse_records({'\x03'}), result);
+         wait_for_more_bytes(2, rl.parse_records({'\x03'}), result);
+         wait_for_more_bytes(1, rl.parse_records({'\x00'}), result);
+         wait_for_more_bytes(1, rl.parse_records({'\x01'}), result);
 
-         auto res1 = rl.parse_records({'\x01'}, std::nullopt);
+         auto res1 = rl.parse_records({'\x01'});
          result.require("received something 1", std::holds_alternative<Records>(res1));
 
          auto rec1 = std::get<Records>(res1);
@@ -273,18 +274,18 @@ std::vector<Test::Result> read_fragmented_records()
 
       CHECK("two change cipher specs in several pieces", [&](auto& result)
          {
-         wait_for_more_bytes(1, rl.parse_records({'\x14', '\x03', '\x03', '\x00'}, std::nullopt), result);
+         wait_for_more_bytes(1, rl.parse_records({'\x14', '\x03', '\x03', '\x00'}), result);
 
-         auto res2 = rl.parse_records({'\x01', '\x01', /* second CCS starts here */ '\x14', '\x03'}, std::nullopt);
+         auto res2 = rl.parse_records({'\x01', '\x01', /* second CCS starts here */ '\x14', '\x03'});
          result.require("received something 2", std::holds_alternative<Records>(res2));
 
          auto rec2 = std::get<Records>(res2);
          result.test_eq("received 1 record", rec2.size(), 1);
          result.confirm("received CCS", rec2.front().type == TLS::Record_Type::CHANGE_CIPHER_SPEC);
 
-         wait_for_more_bytes(2, rl.parse_records({'\x03'}, std::nullopt), result);
+         wait_for_more_bytes(2, rl.parse_records({'\x03'}), result);
 
-         auto res3 = rl.parse_records({'\x00', '\x01', '\x01'}, std::nullopt);
+         auto res3 = rl.parse_records({'\x00', '\x01', '\x01'});
          result.require("received something 3", std::holds_alternative<Records>(res3));
 
          auto rec3 = std::get<Records>(res3);
@@ -398,7 +399,8 @@ read_encrypted_records()
       {
       CHECK("read encrypted server hello extensions", [&](Test::Result &result)
          {
-         auto res = parse_records(encrypted_record);
+         auto cs = rfc8448_rtt1_handshake_traffic();
+         auto res = parse_records(encrypted_record, cs.get());
          result.require("some records decrypted", !std::holds_alternative<Botan::TLS::BytesNeeded>(res));
          auto records = std::get<Records>(res);
          result.require("one record decrypted", records.size() == 1);
@@ -415,7 +417,8 @@ read_encrypted_records()
 
          result.test_throws<Botan::Invalid_Authentication_Tag>("broken record detected", [&]
             {
-            parse_records(tampered_encrypted_record);
+            auto cs = rfc8448_rtt1_handshake_traffic();
+            parse_records(tampered_encrypted_record, cs.get());
             });
          }),
 
@@ -425,7 +428,8 @@ read_encrypted_records()
 
          result.test_throws<Botan::Invalid_Authentication_Tag>("broken record detected", [&]
             {
-            parse_records(short_record);
+            auto cs = rfc8448_rtt1_handshake_traffic();
+            parse_records(short_record, cs.get());
             });
          }),
 

@@ -56,9 +56,14 @@ public:
     * Return value contains either the number of bytes (`size_t`) needed to proceed
     * with processing TLS records or a list of plaintext TLS record contents
     * containing higher level protocol or application data.
+    *
+    * @param data_from_peer  The data to be parsed.
+    * @param cipher_state    Optional pointer to a Cipher_State instance. If provided, the
+    *                        cipher_state should be ready to decrypt data. Pass nullptr to
+    *                        process plaintext data.
     */
    ReadResult<std::vector<Record>> parse_records(const std::vector<uint8_t>& data_from_peer,
-                                                 std::optional<Cipher_State*> cipher_state);
+                                                 Cipher_State* cipher_state=nullptr);
 
    std::vector<uint8_t> prepare_records(const Record_Type type,
                                         const uint8_t data[], size_t size)
@@ -76,7 +81,7 @@ public:
    std::vector<uint8_t> prepare_dummy_ccs_record();
 
 private:
-   ReadResult<Record> read_record(std::optional<Cipher_State*> cipher_state);
+   ReadResult<Record> read_record(Cipher_State* cipher_state);
 
    std::vector<uint8_t> prepare_records(const Record_Type type,
                                         const uint8_t data[], size_t size,

@@ -122,7 +122,7 @@ Record_Layer::~Record_Layer() {};
 
 Record_Layer::ReadResult<std::vector<Record>>
       Record_Layer::parse_records(const std::vector<uint8_t>& data_from_peer,
-                                  std::optional<Cipher_State*> cipher_state)
+                                  Cipher_State* cipher_state)
    {
    std::vector<Record> records_received;
 
@@ -235,7 +235,7 @@ std::vector<uint8_t> Record_Layer::prepare_dummy_ccs_record()
    }
 
 
-Record_Layer::ReadResult<Record> Record_Layer::read_record(std::optional<Cipher_State*> cipher_state)
+Record_Layer::ReadResult<Record> Record_Layer::read_record(Cipher_State* cipher_state)
    {
    if(m_read_buffer.size() < TLS_HEADER_SIZE)
       {
@@ -267,12 +267,14 @@ Record_Layer::ReadResult<Record> Record_Layer::read_record(std::optional<Cipher_
 
    if(record.type == Record_Type::APPLICATION_DATA)
       {
-      if(!cipher_state.has_value())
-         throw TLS_Exception(Alert::UNEXPECTED_MESSAGE,
-                             "premature Application Data received");
+      if(cipher_state == nullptr)
+         {
+         // This could also mean a misuse of the interface, i.e. failing to provide a valid
+         // cipher_state to parse_records when receiving valid (encrypted) Application Data.
+         throw TLS_Exception(Alert::UNEXPECTED_MESSAGE, "premature Application Data received");
+         }
 
-      BOTAN_ASSERT_NOMSG(cipher_state.value() != nullptr);
-      cipher_state.value()->decrypt({header_begin, header_end}, record.fragment);
+      cipher_state->decrypt({header_begin, header_end}, record.fragment);
 
       // hydrate the actual content type from TLSInnerPlaintext
       record.type = read_record_type(record.fragment.back());
